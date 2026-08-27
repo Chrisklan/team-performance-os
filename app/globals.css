@@ -1,0 +1,39 @@
+/* Team Performance OS — global styles
+ * Switzer (Fontshare, lizenzfrei/kommerziell nutzbar) wird über @import gebundlet.
+ * Fällt auf system-ui zurück, wenn offline. */
+@import url("https://api.fontshare.com/v2/css?f[]=switzer@400,500,700&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Design-Tokens v0.2 */
+  --surface: #0f1620;
+  --surface-card: #16212e;
+  --accent: #3e8eff;
+  --warn: #e23d3d;
+  --ok: #3fb87a;
+  --ink: #e6edf3;
+  --muted: #8a98a8;
+}
+
+html,
+body {
+  background: var(--surface);
+  color: var(--ink);
+  font-family: "Switzer", system-ui, -apple-system, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Reduced-Motion: keine nicht-essentiellen Animationen (Build-Contract §Constraint). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
