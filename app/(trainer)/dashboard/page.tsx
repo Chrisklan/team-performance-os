@@ -7,8 +7,8 @@ import { KaderGrid } from "@/components/trainer/KaderGrid";
 import { fetchKaderForCoach } from "@/lib/trainer/api";
 import { attentionSort } from "@/lib/trainer/sort";
 
-export default function TrainerDashboardPage() {
-  const payload = fetchKaderForCoach();
+export default async function TrainerDashboardPage() {
+  const payload = await fetchKaderForCoach();
   const members = attentionSort(payload.members);
   const isLive = payload.syncState === "live";
 

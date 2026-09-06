@@ -1,14 +1,13 @@
 // Team Performance OS — Daten-Layer (Trainer-Frontend, Coach-Rolle).
 //
-// Simuliert die RLS-gesicherte Supabase-Abfrage für app_role='coach'.
+// Ruft rpc_morning_ops() auf (RLS-gesichert, app_role='coach'/'athletic_coach').
 // Liefert den Kader-Payload NACH dem RLS-Gate: Medical-Inhalte reduziert auf
-// Badge + Freigabe (medical_status_view). Die Roh-Tabellen medical_records
+// Badge + Freigabe. Die Roh-Tabellen medical_records
 // (diagnosis/symptoms/treatment/reha_phase) sind im Coach-Payload NICHT enthalten.
-//
-// Der spätere echte Code ersetzt diese Funktion durch einen Supabase-Select, der
-// nur medical_status_view (nicht medical_records) joined. Die Form des Rückgabe-
-// typs (CoachKaderPayload) bleibt identisch -> UI unverändert.
+// Bei jedem Fehler (kein Supabase-Env, RPC-Fehler, FORBIDDEN) fällt der Layer auf
+// die Fixtures zurück, damit das Dashboard im Pilot-Stand nie hart bricht.
 
+import { createServerClient } from "@/lib/supabase/client";
 import { seedKader } from "./fixtures";
 import type { CoachKaderPayload } from "./types";
 
@@ -20,10 +19,23 @@ export const FORBIDDEN_MEDICAL_KEYS = [
   "reha_phase",
 ] as const;
 
-export function fetchKaderForCoach(): CoachKaderPayload {
-  // Im Scaffold: Seed-Daten. Produktion: Supabase-Query mit app_role='coach',
-  // die medical_status_view joint (kein Zugriff auf medical_records-Basiszeile).
-  return seedKader;
+export async function fetchKaderForCoach(): Promise<CoachKaderPayload> {
+  try {
+    const supabase = createServerClient();
+    const { data, error } = await supabase.rpc("rpc_morning_ops");
+
+    if (error || !data) {
+      throw error ?? new Error("rpc_morning_ops returned no data");
+    }
+
+    return data as CoachKaderPayload;
+  } catch (err) {
+    console.warn(
+      "fetchKaderForCoach: rpc_morning_ops fehlgeschlagen, falle auf Fixtures zurück.",
+      err,
+    );
+    return seedKader;
+  }
 }
 
 // RLS-Verifikation: liefert true, wenn der serialisierte Coach-Payload keine
