@@ -41,7 +41,7 @@ SET ROLE authenticated;
 
 SET LOCAL request.jwt.claims = '{"sub":"11111111-1111-1111-1111-111111111111","role":"authenticated","app_role":"admin","team_id":"22222222-2222-2222-2222-222222222222"}';
 
-SELECT is(app.auth_person_id(), '11111111-1111-1111-1111-111111111111'::uuid, 'auth_person_id() returns sub from JWT');
+SELECT is(app.auth_person_id(), '33333333-3333-3333-3333-333333333333'::uuid, 'auth_person_id() resolves persons.id via auth_user_id = JWT sub');
 SELECT is(app.auth_team_id(), '22222222-2222-2222-2222-222222222222'::uuid, 'auth_team_id() returns team_id from JWT');
 SELECT is(app.auth_has_role('admin'), true, 'auth_has_role(''admin'') = true when app_role=admin');
 SELECT is(app.auth_has_role('coach'), false, 'auth_has_role(''coach'') = false when app_role=admin');
@@ -180,7 +180,7 @@ SELECT throws_ok(
 );
 
 SELECT lives_ok(
-  $$SELECT id, display_name, position, shirt_number FROM app.persons LIMIT 1$$,
+  $$SELECT id, display_name, person_position, shirt_number FROM app.persons LIMIT 1$$,
   'coach can select allowed columns'
 );
 

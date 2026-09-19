@@ -15,12 +15,12 @@ SELECT no_plan();
 INSERT INTO app.teams (id, name, timezone) VALUES
   ('11111111-1111-1111-1111-111111111111', 'Test Team', 'Europe/Berlin');
 
-INSERT INTO app.persons (id, team_id, display_name, person_position) VALUES
-  ('22222222-2222-2222-2222-222222222222', '11111111-1111-1111-1111-111111111111', 'Admin User', 'admin'),
-  ('33333333-3333-3333-3333-333333333333', '11111111-1111-1111-1111-111111111111', 'Coach User', 'coach'),
-  ('44444444-4444-4444-4444-444444444444', '11111111-1111-1111-1111-111111111111', 'Physio User', 'physio'),
-  ('55555555-5555-5555-5555-555555555555', '11111111-1111-1111-1111-111111111111', 'Doctor User', 'doctor'),
-  ('66666666-6666-6666-6666-666666666666', '11111111-1111-1111-1111-111111111111', 'Player User', 'player');
+INSERT INTO app.persons (id, team_id, display_name, person_position, auth_user_id) VALUES
+  ('22222222-2222-2222-2222-222222222222', '11111111-1111-1111-1111-111111111111', 'Admin User', 'admin', '22222222-2222-2222-2222-222222222222'),
+  ('33333333-3333-3333-3333-333333333333', '11111111-1111-1111-1111-111111111111', 'Coach User', 'coach', '33333333-3333-3333-3333-333333333333'),
+  ('44444444-4444-4444-4444-444444444444', '11111111-1111-1111-1111-111111111111', 'Physio User', 'physio', '44444444-4444-4444-4444-444444444444'),
+  ('55555555-5555-5555-5555-555555555555', '11111111-1111-1111-1111-111111111111', 'Doctor User', 'doctor', '55555555-5555-5555-5555-555555555555'),
+  ('66666666-6666-6666-6666-666666666666', '11111111-1111-1111-1111-111111111111', 'Player User', 'player', '66666666-6666-6666-6666-666666666666');
 
 INSERT INTO app.role_assignments (team_id, person_id, role) VALUES
   ('11111111-1111-1111-1111-111111111111', '22222222-2222-2222-2222-222222222222', 'admin'),
@@ -64,9 +64,9 @@ SELECT lives_ok($$SELECT * FROM app.rpc_export_my_data()$$, 'rpc_export_my_data 
 
 -- Zuruecksetzen (nach shred sind Daten weg, also neu setzen)
 SELECT app._test_set_jwt('{"sub":"22222222-2222-2222-2222-222222222222","role":"authenticated","app_role":"admin","team_id":"11111111-1111-1111-1111-111111111111"}');
-INSERT INTO app.persons (id, team_id, display_name, person_position) VALUES
-  ('66666666-6666-6666-6666-666666666666', '11111111-1111-1111-1111-111111111111', 'Player User', 'player')
-ON CONFLICT (id) DO UPDATE SET is_active = true, display_name = 'Player User', auth_user_id = NULL, birth_date = NULL, updated_at = now();
+INSERT INTO app.persons (id, team_id, display_name, person_position, auth_user_id) VALUES
+  ('66666666-6666-6666-6666-666666666666', '11111111-1111-1111-1111-111111111111', 'Player User', 'player', '66666666-6666-6666-6666-666666666666')
+ON CONFLICT (id) DO UPDATE SET is_active = true, display_name = 'Player User', auth_user_id = '66666666-6666-6666-6666-666666666666', birth_date = NULL, updated_at = now();
 
 INSERT INTO app.medical_clearances (team_id, person_id, status, load_note, valid_from, set_by, set_by_role) VALUES
   ('11111111-1111-1111-1111-111111111111', '66666666-6666-6666-6666-666666666666', 'limited', 'max 60 min', '2026-09-01', '55555555-5555-5555-5555-555555555555', 'doctor')

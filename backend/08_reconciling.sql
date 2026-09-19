@@ -160,17 +160,57 @@ ALTER TABLE app.access_denials FORCE ROW LEVEL SECURITY;
 -- 3. Helper-Funktionen
 -- Lesen die simulierten JWT-Claims direkt aus request.jwt.claims:
 -- {"sub":"<uuid>","role":"authenticated","app_role":"coach","team_id":"<tid>"}
+--
+-- auth_person_id() loest den JWT sub (= auth.users.id) ueber
+-- app.persons.auth_user_id auf die stabile app.persons.id auf. Stand wie in
+-- der Cloud (Migration 20260914000012, AP-27 Drift-Angleichung 2026-09-19).
 -- =============================================================================
 
 CREATE OR REPLACE FUNCTION app.auth_person_id()
 RETURNS uuid
-LANGUAGE sql
+LANGUAGE plpgsql
 STABLE
 SECURITY DEFINER
-SET search_path = app, auth, pg_temp
+SET search_path = ''
 AS $$
-  SELECT (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'sub')::uuid;
+DECLARE
+  v_sub       text;
+  v_auth_uid  uuid;
+  v_person_id uuid;
+BEGIN
+  -- JWT sub aus den PostgREST-Claims (aktuelles Format), Fallback auf das
+  -- aeltere Einzel-Claim-Setting.
+  v_sub := nullif(
+             btrim(
+               coalesce(
+                 nullif(pg_catalog.current_setting('request.jwt.claims', true), '')::jsonb ->> 'sub',
+                 nullif(pg_catalog.current_setting('request.jwt.claim.sub', true), '')
+               )
+             ),
+             ''
+           );
+
+  IF v_sub IS NULL THEN
+    RETURN NULL;
+  END IF;
+
+  BEGIN
+    v_auth_uid := v_sub::uuid;
+  EXCEPTION
+    WHEN invalid_text_representation THEN
+      RETURN NULL;
+  END;
+
+  SELECT pe.id INTO v_person_id
+  FROM app.persons pe
+  WHERE pe.auth_user_id = v_auth_uid;
+
+  RETURN v_person_id;  -- NULL, wenn keine Person gemappt ist
+END;
 $$;
+
+COMMENT ON FUNCTION app.auth_person_id() IS
+  'Returns the stable app.persons.id of the authenticated user by looking up app.persons.auth_user_id = JWT sub (auth.uid()). Returns NULL if there is no JWT subject or no mapped person. Person IDs stay stable across pilot auth binding.';
 
 CREATE OR REPLACE FUNCTION app.auth_team_id()
 RETURNS uuid
