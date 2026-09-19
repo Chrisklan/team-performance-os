@@ -1,6 +1,9 @@
 // Team Performance OS — Session-Refresh und Routenschutz in der Middleware.
 // getUser() prueft das Token beim Auth-Server (nicht nur getSession() aus dem Cookie).
-// Ohne gueltigen User: Trainer-Routen leiten auf /login um (Login-UI folgt in AP-31).
+// Ohne gueltigen User: Trainer-Routen leiten auf /login um. Mit gueltigem User geht
+// /login direkt weiter aufs Dashboard.
+// Ist der Auth-Server nicht erreichbar, wird nicht auf /login umgeleitet: das waere
+// ein falscher Befund ("nicht angemeldet"). Die Seite meldet dann selbst NETWORK.
 
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
@@ -42,9 +45,19 @@ export async function updateSession(request: NextRequest) {
   // Nichts zwischen createServerClient und getUser() einfuegen (Refresh-Reihenfolge).
   const {
     data: { user },
+    error: userError,
   } = await supabase.auth.getUser();
 
-  if (!user && isTrainerRoute(request.nextUrl.pathname)) {
+  const authServerUnreachable = userError?.name === "AuthRetryableFetchError";
+
+  if (user && request.nextUrl.pathname === "/login") {
+    const dashboardUrl = request.nextUrl.clone();
+    dashboardUrl.pathname = "/dashboard";
+    dashboardUrl.search = "";
+    return NextResponse.redirect(dashboardUrl);
+  }
+
+  if (!user && !authServerUnreachable && isTrainerRoute(request.nextUrl.pathname)) {
     const loginUrl = request.nextUrl.clone();
     loginUrl.pathname = "/login";
     loginUrl.search = "";

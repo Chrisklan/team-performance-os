@@ -8,10 +8,16 @@
 // (diagnosis/symptoms/treatment/reha_phase) sind im Coach-Payload NICHT enthalten.
 //
 // Kein stiller Fallback: jeder Fehler wird geworfen (SESSION-BRIDGE Regel 2).
-// Die Fehleroberflaeche baut AP-31.
+// Die Seite faengt KaderAccessError ab und zeigt je Code einen eigenen Zustand
+// (components/trainer/KaderStateScreen.tsx). Warum nicht error.tsx: Next.js entfernt in
+// Produktion Message und Felder von Server-Component-Fehlern, der Code kaeme nie an.
 
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { KaderAccessError, classifyRpcError } from "./errors";
 import type { CoachKaderPayload } from "./types";
+
+export { KaderAccessError, classifyRpcError } from "./errors";
+export type { KaderErrorCode } from "./errors";
 
 // Medical-Diagnose-Felder, die im Coach-Payload NIEMALS auftauchen dürfen (RLS-Test).
 export const FORBIDDEN_MEDICAL_KEYS = [
@@ -21,16 +27,6 @@ export const FORBIDDEN_MEDICAL_KEYS = [
   "reha_phase",
 ] as const;
 
-export class KaderAccessError extends Error {
-  constructor(
-    message: string,
-    readonly code: "UNAUTHENTICATED" | "FORBIDDEN" | "RPC_FAILED",
-  ) {
-    super(message);
-    this.name = "KaderAccessError";
-  }
-}
-
 export async function fetchKaderForCoach(): Promise<CoachKaderPayload> {
   const supabase = createSupabaseServerClient();
 
@@ -39,23 +35,20 @@ export async function fetchKaderForCoach(): Promise<CoachKaderPayload> {
     data: { user },
     error: userError,
   } = await supabase.auth.getUser();
+  if (userError?.name === "AuthRetryableFetchError") {
+    throw new KaderAccessError("Auth-Server nicht erreichbar.", "NETWORK");
+  }
   if (userError || !user) {
     throw new KaderAccessError("Nicht angemeldet.", "UNAUTHENTICATED");
   }
 
-  const { data, error } = await supabase.rpc("rpc_trainer_morning_ops");
+  const { data, error, status } = await supabase.rpc("rpc_trainer_morning_ops");
 
   if (error) {
-    if (error.code === "42501") {
-      throw new KaderAccessError("Kein Zugriff auf den Kader.", "FORBIDDEN");
-    }
-    throw new KaderAccessError(
-      `Kader konnte nicht geladen werden (${error.code ?? "unbekannt"}).`,
-      "RPC_FAILED",
-    );
+    throw classifyRpcError(error, status);
   }
   if (!data) {
-    throw new KaderAccessError("Kader-Payload ist leer.", "RPC_FAILED");
+    throw new KaderAccessError("Kader-Payload ist leer.", "RPC_FAILED", "empty_payload");
   }
 
   return data as CoachKaderPayload;

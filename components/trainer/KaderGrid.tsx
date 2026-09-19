@@ -40,7 +40,7 @@ export function KaderGrid({ members }: KaderGridProps) {
             type="button"
             onClick={() => setSortMode("attention")}
             aria-pressed={sortMode === "attention"}
-            className={`rounded-sm px-3 py-2 text-sm font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+            className={`flex h-12 items-center rounded-sm px-3 text-sm font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
               sortMode === "attention"
                 ? "bg-accent text-surface"
                 : "bg-white/5 text-muted hover:text-ink"
@@ -52,7 +52,7 @@ export function KaderGrid({ members }: KaderGridProps) {
             type="button"
             onClick={() => setSortMode("jersey")}
             aria-pressed={sortMode === "jersey"}
-            className={`rounded-sm px-3 py-2 text-sm font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+            className={`flex h-12 items-center rounded-sm px-3 text-sm font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
               sortMode === "jersey"
                 ? "bg-accent text-surface"
                 : "bg-white/5 text-muted hover:text-ink"
@@ -62,7 +62,7 @@ export function KaderGrid({ members }: KaderGridProps) {
           </button>
         </div>
 
-        <label className="flex items-center gap-2 text-sm text-muted">
+        <label className="flex h-12 items-center gap-2 text-sm text-muted">
           <input
             type="checkbox"
             checked={onlyAuffaellig}

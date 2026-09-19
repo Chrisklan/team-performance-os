@@ -16,6 +16,7 @@ const config: Config = {
         },
         accent: "#3E8EFF", // Signal / Primär-Aktion (ruhiges Sport-Blau)
         warn: "#E23D3D", // Semantik Aufmerksamkeit/Warnung (gedämpftes Rot)
+        "warn-text": "#FF8A8A", // Warn-Ton für Fließtext auf Karten (Kontrast 7,2:1, #E23D3D erreicht nur 3,9:1)
         ok: "#3FB87A", // Semantik Positiv (ruhiges Grün)
         ink: "#E6EDF3", // Text/Neutral auf Dunkel
         muted: "#8A98A8", // gedämpfter Neutrralton für Sekundärtext
