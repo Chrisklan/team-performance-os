@@ -9,7 +9,7 @@ SELECT plan(41);
 -- SETUP: Testdaten als Superuser
 -- =============================================================================
 
-SET LOCAL request.jwt.claims = '{"sub":"11111111-1111-1111-1111-111111111111","role":"authenticated","app_role":"admin","team_id":"22222222-2222-2222-2222-222222222222"}';
+SET LOCAL request.jwt.claims = '{"sub":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","role":"authenticated","app_role":"admin","team_id":"22222222-2222-2222-2222-222222222222"}';
 
 INSERT INTO app.teams (id, name, timezone) VALUES ('22222222-2222-2222-2222-222222222222'::uuid, 'Test Team', 'Europe/Berlin');
 INSERT INTO app.persons (id, team_id, display_name, auth_user_id) VALUES ('33333333-3333-3333-3333-333333333333'::uuid, '22222222-2222-2222-2222-222222222222'::uuid, 'Test Person', '11111111-1111-1111-1111-111111111111'::uuid);
@@ -19,6 +19,12 @@ INSERT INTO app.persons (id, team_id, display_name, auth_user_id) VALUES ('44444
 INSERT INTO app.role_assignments (id, team_id, person_id, role) VALUES ('44444444-4444-4444-4444-444444444446'::uuid, '22222222-2222-2222-2222-222222222222'::uuid, '33333333-3333-3333-3333-333333333333'::uuid, 'player');
 INSERT INTO app.role_assignments (id, team_id, person_id, role) VALUES ('44444444-4444-4444-4444-444444444447'::uuid, '22222222-2222-2222-2222-222222222222'::uuid, '44444444-4444-4444-4444-444444444444'::uuid, 'doctor');
 INSERT INTO app.role_assignments (id, team_id, person_id, role) VALUES ('44444444-4444-4444-4444-444444444448'::uuid, '22222222-2222-2222-2222-222222222222'::uuid, '44444444-4444-4444-4444-444444444445'::uuid, 'physio');
+-- ADR-015 Stufe 2: Claims gelten nur, wenn role_assignments sie bestaetigt.
+-- Admin- und Coach-Claims brauchen deshalb eigene Personen mit dieser Rolle.
+INSERT INTO app.persons (id, team_id, display_name, auth_user_id) VALUES ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'::uuid, '22222222-2222-2222-2222-222222222222'::uuid, 'Admin Person', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'::uuid);
+INSERT INTO app.persons (id, team_id, display_name, auth_user_id) VALUES ('cccccccc-cccc-cccc-cccc-cccccccccccc'::uuid, '22222222-2222-2222-2222-222222222222'::uuid, 'Coach Person', 'cccccccc-cccc-cccc-cccc-cccccccccccc'::uuid);
+INSERT INTO app.role_assignments (id, team_id, person_id, role) VALUES ('44444444-4444-4444-4444-44444444444a'::uuid, '22222222-2222-2222-2222-222222222222'::uuid, 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'::uuid, 'admin');
+INSERT INTO app.role_assignments (id, team_id, person_id, role) VALUES ('44444444-4444-4444-4444-44444444444c'::uuid, '22222222-2222-2222-2222-222222222222'::uuid, 'cccccccc-cccc-cccc-cccc-cccccccccccc'::uuid, 'coach');
 
 
 -- =============================================================================
@@ -39,10 +45,10 @@ SELECT has_function('app', 'auth_is_medical', 'app.auth_is_medical() exists');
 
 SET ROLE authenticated;
 
-SET LOCAL request.jwt.claims = '{"sub":"11111111-1111-1111-1111-111111111111","role":"authenticated","app_role":"admin","team_id":"22222222-2222-2222-2222-222222222222"}';
+SET LOCAL request.jwt.claims = '{"sub":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","role":"authenticated","app_role":"admin","team_id":"22222222-2222-2222-2222-222222222222"}';
 
-SELECT is(app.auth_person_id(), '33333333-3333-3333-3333-333333333333'::uuid, 'auth_person_id() resolves persons.id via auth_user_id = JWT sub');
-SELECT is(app.auth_team_id(), '22222222-2222-2222-2222-222222222222'::uuid, 'auth_team_id() returns team_id from JWT');
+SELECT is(app.auth_person_id(), 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'::uuid, 'auth_person_id() resolves persons.id via auth_user_id = JWT sub');
+SELECT is(app.auth_team_id(), '22222222-2222-2222-2222-222222222222'::uuid, 'auth_team_id() returns team_id from JWT, confirmed by DB');
 SELECT is(app.auth_has_role('admin'), true, 'auth_has_role(''admin'') = true when app_role=admin');
 SELECT is(app.auth_has_role('coach'), false, 'auth_has_role(''coach'') = false when app_role=admin');
 SELECT is(app.auth_in_team('22222222-2222-2222-2222-222222222222'::uuid), true, 'auth_in_team() returns true for own team');
@@ -53,7 +59,7 @@ SELECT is(app.auth_in_team('99999999-9999-9999-9999-999999999999'::uuid), false,
 -- 3. HELPER: auth_is_staff / auth_is_medical als Coach
 -- =============================================================================
 
-SET LOCAL request.jwt.claims = '{"sub":"11111111-1111-1111-1111-111111111111","role":"authenticated","app_role":"coach","team_id":"22222222-2222-2222-2222-222222222222"}';
+SET LOCAL request.jwt.claims = '{"sub":"cccccccc-cccc-cccc-cccc-cccccccccccc","role":"authenticated","app_role":"coach","team_id":"22222222-2222-2222-2222-222222222222"}';
 
 SELECT is(app.auth_is_staff(), true, 'auth_is_staff() = true for coach');
 SELECT is(app.auth_is_medical(), false, 'auth_is_medical() = false for coach');
@@ -63,8 +69,8 @@ SELECT is(app.auth_is_medical(), false, 'auth_is_medical() = false for coach');
 -- 4. RLS-POLICIES: persons
 -- =============================================================================
 
-SET LOCAL request.jwt.claims = '{"sub":"11111111-1111-1111-1111-111111111111","role":"authenticated","app_role":"admin","team_id":"22222222-2222-2222-2222-222222222222"}';
-SELECT is((SELECT count(*) FROM app.persons)::int, 4, 'admin sees 4 persons in team');
+SET LOCAL request.jwt.claims = '{"sub":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","role":"authenticated","app_role":"admin","team_id":"22222222-2222-2222-2222-222222222222"}';
+SELECT is((SELECT count(*) FROM app.persons)::int, 6, 'admin sees 6 persons in team');
 
 SELECT lives_ok(
   $$INSERT INTO app.persons (id, team_id, display_name) VALUES ('33333333-3333-3333-3333-333333333335'::uuid, '22222222-2222-2222-2222-222222222222'::uuid, 'Admin Insert')$$,
@@ -76,8 +82,8 @@ SELECT lives_ok(
   'admin can update person'
 );
 
-SET LOCAL request.jwt.claims = '{"sub":"11111111-1111-1111-1111-111111111111","role":"authenticated","app_role":"coach","team_id":"22222222-2222-2222-2222-222222222222"}';
-SELECT is((SELECT count(*) FROM app.persons)::int, 5, 'coach sees 5 persons in team');
+SET LOCAL request.jwt.claims = '{"sub":"cccccccc-cccc-cccc-cccc-cccccccccccc","role":"authenticated","app_role":"coach","team_id":"22222222-2222-2222-2222-222222222222"}';
+SELECT is((SELECT count(*) FROM app.persons)::int, 7, 'coach sees 7 persons in team');
 
 SELECT throws_ok(
   $$INSERT INTO app.persons (team_id, display_name) VALUES ('22222222-2222-2222-2222-222222222222'::uuid, 'Coach Insert')$$,
@@ -91,11 +97,11 @@ SELECT throws_ok(
 -- 5. RLS-POLICIES: role_assignments
 -- =============================================================================
 
-SET LOCAL request.jwt.claims = '{"sub":"11111111-1111-1111-1111-111111111111","role":"authenticated","app_role":"admin","team_id":"22222222-2222-2222-2222-222222222222"}';
-SELECT is((SELECT count(*) FROM app.role_assignments)::int, 3, 'admin sees 3 role_assignments initially');
+SET LOCAL request.jwt.claims = '{"sub":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","role":"authenticated","app_role":"admin","team_id":"22222222-2222-2222-2222-222222222222"}';
+SELECT is((SELECT count(*) FROM app.role_assignments)::int, 5, 'admin sees 5 role_assignments initially');
 
 SELECT lives_ok(
-  $$INSERT INTO app.role_assignments (id, team_id, person_id, role) VALUES ('44444444-4444-4444-4444-444444444449'::uuid, '22222222-2222-2222-2222-222222222222'::uuid, '33333333-3333-3333-3333-333333333333'::uuid, 'coach')$$,
+  $$INSERT INTO app.role_assignments (id, team_id, person_id, role) VALUES ('44444444-4444-4444-4444-444444444449'::uuid, '22222222-2222-2222-2222-222222222222'::uuid, '33333333-3333-3333-3333-333333333334'::uuid, 'coach')$$,
   'admin can insert role_assignment'
 );
 
@@ -104,11 +110,11 @@ SELECT lives_ok(
   'admin can update role_assignment'
 );
 
-SET LOCAL request.jwt.claims = '{"sub":"11111111-1111-1111-1111-111111111111","role":"authenticated","app_role":"coach","team_id":"22222222-2222-2222-2222-222222222222"}';
-SELECT is((SELECT count(*) FROM app.role_assignments)::int, 4, 'coach sees 4 role_assignments');
+SET LOCAL request.jwt.claims = '{"sub":"cccccccc-cccc-cccc-cccc-cccccccccccc","role":"authenticated","app_role":"coach","team_id":"22222222-2222-2222-2222-222222222222"}';
+SELECT is((SELECT count(*) FROM app.role_assignments)::int, 6, 'coach sees 6 role_assignments');
 
 SELECT throws_ok(
-  $$INSERT INTO app.role_assignments (team_id, person_id, role) VALUES ('22222222-2222-2222-2222-222222222222'::uuid, '33333333-3333-3333-3333-333333333333'::uuid, 'player')$$,
+  $$INSERT INTO app.role_assignments (team_id, person_id, role) VALUES ('22222222-2222-2222-2222-222222222222'::uuid, '33333333-3333-3333-3333-333333333335'::uuid, 'player')$$,
   42501,
   NULL,
   'coach cannot insert role_assignment'
@@ -142,7 +148,7 @@ SELECT throws_ok(
   'physio cannot insert medical_clearance'
 );
 
-SET LOCAL request.jwt.claims = '{"sub":"11111111-1111-1111-1111-111111111111","role":"authenticated","app_role":"coach","team_id":"22222222-2222-2222-2222-222222222222"}';
+SET LOCAL request.jwt.claims = '{"sub":"cccccccc-cccc-cccc-cccc-cccccccccccc","role":"authenticated","app_role":"coach","team_id":"22222222-2222-2222-2222-222222222222"}';
 SELECT is((SELECT count(*) FROM app.medical_clearances)::int, 1, 'coach sees 1 medical_clearance in team');
 
 
@@ -150,10 +156,10 @@ SELECT is((SELECT count(*) FROM app.medical_clearances)::int, 1, 'coach sees 1 m
 -- 7. RLS-POLICIES: audit_log (admin-only)
 -- =============================================================================
 
-SET LOCAL request.jwt.claims = '{"sub":"11111111-1111-1111-1111-111111111111","role":"authenticated","app_role":"admin","team_id":"22222222-2222-2222-2222-222222222222"}';
+SET LOCAL request.jwt.claims = '{"sub":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","role":"authenticated","app_role":"admin","team_id":"22222222-2222-2222-2222-222222222222"}';
 SELECT ok((SELECT count(*) FROM app.audit_log) > 0, 'admin can read audit_log (entries from trigger)');
 
-SET LOCAL request.jwt.claims = '{"sub":"11111111-1111-1111-1111-111111111111","role":"authenticated","app_role":"coach","team_id":"22222222-2222-2222-2222-222222222222"}';
+SET LOCAL request.jwt.claims = '{"sub":"cccccccc-cccc-cccc-cccc-cccccccccccc","role":"authenticated","app_role":"coach","team_id":"22222222-2222-2222-2222-222222222222"}';
 SELECT is((SELECT count(*) FROM app.audit_log)::int, 0, 'coach cannot read audit_log');
 
 
@@ -161,10 +167,10 @@ SELECT is((SELECT count(*) FROM app.audit_log)::int, 0, 'coach cannot read audit
 -- 8. RLS-POLICIES: access_denials (admin-only)
 -- =============================================================================
 
-SET LOCAL request.jwt.claims = '{"sub":"11111111-1111-1111-1111-111111111111","role":"authenticated","app_role":"admin","team_id":"22222222-2222-2222-2222-222222222222"}';
+SET LOCAL request.jwt.claims = '{"sub":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","role":"authenticated","app_role":"admin","team_id":"22222222-2222-2222-2222-222222222222"}';
 SELECT is((SELECT count(*) FROM app.access_denials)::int, 0, 'admin sees 0 access_denials initially');
 
-SET LOCAL request.jwt.claims = '{"sub":"11111111-1111-1111-1111-111111111111","role":"authenticated","app_role":"coach","team_id":"22222222-2222-2222-2222-222222222222"}';
+SET LOCAL request.jwt.claims = '{"sub":"cccccccc-cccc-cccc-cccc-cccccccccccc","role":"authenticated","app_role":"coach","team_id":"22222222-2222-2222-2222-222222222222"}';
 SELECT is((SELECT count(*) FROM app.access_denials)::int, 0, 'coach cannot read access_denials');
 
 
@@ -193,7 +199,7 @@ SET LOCAL request.jwt.claims = '{"sub":"44444444-4444-4444-4444-444444444444","r
 
 INSERT INTO app.medical_clearances (id, team_id, person_id, status, set_by, set_by_role) VALUES ('55555555-5555-5555-5555-555555555556'::uuid, '22222222-2222-2222-2222-222222222222'::uuid, '33333333-3333-3333-3333-333333333333'::uuid, 'individual', '44444444-4444-4444-4444-444444444444'::uuid, 'doctor');
 
-SET LOCAL request.jwt.claims = '{"sub":"11111111-1111-1111-1111-111111111111","role":"authenticated","app_role":"admin","team_id":"22222222-2222-2222-2222-222222222222"}';
+SET LOCAL request.jwt.claims = '{"sub":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","role":"authenticated","app_role":"admin","team_id":"22222222-2222-2222-2222-222222222222"}';
 
 SELECT is(
   (SELECT count(*) FROM app.audit_log WHERE table_name = 'medical_clearances' AND row_id = '55555555-5555-5555-5555-555555555556'::uuid AND operation = 'INSERT')::int,
@@ -210,7 +216,7 @@ SET LOCAL request.jwt.claims = '{"sub":"44444444-4444-4444-4444-444444444444","r
 
 UPDATE app.medical_clearances SET status = 'blocked', load_note = 'No training' WHERE id = '55555555-5555-5555-5555-555555555556'::uuid;
 
-SET LOCAL request.jwt.claims = '{"sub":"11111111-1111-1111-1111-111111111111","role":"authenticated","app_role":"admin","team_id":"22222222-2222-2222-2222-222222222222"}';
+SET LOCAL request.jwt.claims = '{"sub":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","role":"authenticated","app_role":"admin","team_id":"22222222-2222-2222-2222-222222222222"}';
 
 SELECT is(
   (SELECT count(*) FROM app.audit_log WHERE table_name = 'medical_clearances' AND row_id = '55555555-5555-5555-5555-555555555556'::uuid AND operation = 'UPDATE')::int,
@@ -245,7 +251,7 @@ SELECT is(
 
 SET ROLE authenticated;
 
-SET LOCAL request.jwt.claims = '{"sub":"11111111-1111-1111-1111-111111111111","role":"authenticated","app_role":"admin","team_id":"22222222-2222-2222-2222-222222222222"}';
+SET LOCAL request.jwt.claims = '{"sub":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","role":"authenticated","app_role":"admin","team_id":"22222222-2222-2222-2222-222222222222"}';
 
 INSERT INTO app.persons (id, team_id, display_name) VALUES ('33333333-3333-3333-3333-333333333336'::uuid, '22222222-2222-2222-2222-222222222222'::uuid, 'Trigger Test Person');
 

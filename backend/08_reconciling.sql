@@ -50,6 +50,10 @@ DROP TYPE IF EXISTS app.app_role CASCADE;
 CREATE SCHEMA IF NOT EXISTS app;
 GRANT USAGE ON SCHEMA app TO authenticated, anon, service_role;
 
+-- btree_gist fuer die Exklusivitaetsregel in app.role_assignments (ADR-015).
+CREATE SCHEMA IF NOT EXISTS extensions;
+CREATE EXTENSION IF NOT EXISTS btree_gist WITH SCHEMA extensions;
+
 CREATE TYPE app.app_role AS ENUM ('player', 'coach', 'athletic_coach', 'physio', 'doctor', 'admin');
 CREATE TYPE app.app_clearance AS ENUM ('full', 'limited', 'individual', 'blocked');
 
@@ -86,7 +90,13 @@ CREATE TABLE app.role_assignments (
   valid_from  timestamptz NOT NULL DEFAULT now(),
   valid_to    timestamptz,
   created_at  timestamptz NOT NULL DEFAULT now(),
-  CONSTRAINT role_assignments_valid_range CHECK (valid_to IS NULL OR valid_to > valid_from)
+  CONSTRAINT role_assignments_valid_range CHECK (valid_to IS NULL OR valid_to > valid_from),
+  -- ADR-009 Punkt 4 / ADR-015: eine aktive Rolle pro Person. Gueltigkeits-
+  -- zeitraeume derselben Person duerfen sich nicht ueberlappen.
+  CONSTRAINT role_assignments_one_active_role EXCLUDE USING gist (
+    person_id WITH =,
+    tstzrange(valid_from, valid_to) WITH &&
+  )
 );
 
 CREATE TABLE app.medical_clearances (
@@ -158,7 +168,8 @@ ALTER TABLE app.access_denials FORCE ROW LEVEL SECURITY;
 
 -- =============================================================================
 -- 3. Helper-Funktionen
--- Lesen die simulierten JWT-Claims direkt aus request.jwt.claims:
+-- Lesen die JWT-Claims aus request.jwt.claims (gesetzt vom Custom Access
+-- Token Hook, backend/10_auth_hook.sql):
 -- {"sub":"<uuid>","role":"authenticated","app_role":"coach","team_id":"<tid>"}
 --
 -- auth_person_id() loest den JWT sub (= auth.users.id) ueber
@@ -212,6 +223,12 @@ $$;
 COMMENT ON FUNCTION app.auth_person_id() IS
   'Returns the stable app.persons.id of the authenticated user by looking up app.persons.auth_user_id = JWT sub (auth.uid()). Returns NULL if there is no JWT subject or no mapped person. Person IDs stay stable across pilot auth binding.';
 
+-- DB-Waechter Stufe 2 (ADR-015): Die Claims app_role und team_id gelten nur,
+-- wenn die DB sie in diesem Moment bestaetigt: Person ueber JWT sub gebunden
+-- und aktiv, team_id der Person = Claim, Rolle aus dem Claim in
+-- app.role_assignments jetzt gueltig. Shredding, Deaktivierung und
+-- Rollenentzug sperren damit sofort, auch mit einem noch gueltigen Token.
+-- auth_team_id() IS NOT NULL heisst: Claims bestaetigt.
 CREATE OR REPLACE FUNCTION app.auth_team_id()
 RETURNS uuid
 LANGUAGE sql
@@ -219,9 +236,23 @@ STABLE
 SECURITY DEFINER
 SET search_path = app, auth, pg_temp
 AS $$
-  SELECT (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'team_id')::uuid;
+  SELECT pe.team_id
+  FROM (SELECT nullif(current_setting('request.jwt.claims', true), '')::jsonb AS j) c
+  JOIN app.persons pe
+    ON pe.id = app.auth_person_id()
+   AND pe.is_active
+   AND pe.team_id::text = c.j ->> 'team_id'
+  JOIN app.role_assignments ra
+    ON ra.person_id = pe.id
+   AND ra.team_id = pe.team_id
+   AND ra.role::text = c.j ->> 'app_role'
+   AND ra.valid_from <= now()
+   AND (ra.valid_to IS NULL OR ra.valid_to > now())
+  LIMIT 1;
 $$;
 
+-- Nie NULL: ohne bestaetigte Claims false, damit "IF NOT app.auth_has_role()"
+-- in den RPCs sicher FORBIDDEN wirft.
 CREATE OR REPLACE FUNCTION app.auth_has_role(r app.app_role)
 RETURNS boolean
 LANGUAGE sql
@@ -229,7 +260,11 @@ STABLE
 SECURITY DEFINER
 SET search_path = app, auth, pg_temp
 AS $$
-  SELECT (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'app_role') = r::text;
+  SELECT coalesce(
+    (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'app_role') = r::text
+      AND app.auth_team_id() IS NOT NULL,
+    false
+  );
 $$;
 
 CREATE OR REPLACE FUNCTION app.auth_in_team(t uuid)

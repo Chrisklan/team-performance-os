@@ -292,6 +292,14 @@ BEGIN
   v_actor_id := app.auth_person_id();
   v_actor_role := app.denial_actor_role();
 
+  -- Ohne bestaetigtes Team (anon, geshreddet, Rolle entzogen) gibt es kein
+  -- Team, dem die Ablehnung zugeordnet werden kann. Ohne diesen Ausstieg
+  -- scheitert der INSERT an team_id NOT NULL und der Aufrufer bekaeme 23502
+  -- statt FORBIDDEN.
+  IF v_team_id IS NULL THEN
+    RETURN;
+  END IF;
+
   -- In-transaktionaler Fallback (falls dblink nicht verfuegbar)
   INSERT INTO app.access_denials (team_id, actor_id, actor_role, resource, occurred_at)
   VALUES (v_team_id, v_actor_id, v_actor_role, p_resource, now());
