@@ -5,9 +5,13 @@
 //   node scripts/sim-login.mjs --check   Allowlist Readback (funktional) und Format der Rueckkehradresse.
 //                                        Verschickt KEINE Mail, schreibt nichts in Tabellen. Erzeugt beim
 //                                        Verify serverseitig eine Session (auth.sessions +1) wie jeder Login.
-//   node scripts/sim-login.mjs --sim     Wie --check, danach im gebooteten iOS Simulator: App beenden,
-//                                        Wartestatus (tpos.auth.pendingLoginRequestedAt) setzen, App starten,
-//                                        Rueckkehradresse per `xcrun simctl openurl` oeffnen.
+//   node scripts/sim-login.mjs --sim-prepare   Wie --check, danach im gebooteten iOS Simulator: App beenden und
+//                                        Wartestatus (tpos.auth.pendingLoginRequestedAt = jetzt) in AsyncStorage setzen.
+//                                        Danach die App neu starten und mit Metro verbinden (Wartestatus gilt 15 Minuten).
+//   node scripts/sim-login.mjs --sim-open      Wie --check (frischer Einmal Link), danach die Rueckkehradresse per
+//                                        `xcrun simctl openurl` im Simulator oeffnen (iOS fragt "Oeffnen?", antippen).
+//   node scripts/sim-login.mjs --sim-open-used Wie --sim-open, aber der Link wurde vorher einmal aufgerufen (wie von einem
+//                                        Mail Scanner). Zeigt, was die App bei einem verbrauchten Link tut (Punkt 9).
 //
 // Der Service Key bleibt im Speicher, Tokens und die Rueckkehradresse werden nie ausgegeben
 // (nur Schluesselnamen und PASS/FAIL). Die Adresse geht als Argument an simctl (nur lokal, kurz sichtbar in ps).
@@ -15,7 +19,7 @@
 // Erlaubnisregel fuer Claude Code: "Bash(node scripts/sim-login.mjs *)" in .claude/settings.local.json.
 //
 // STATUS: Entwurf. --check ist die Wiederholung des Readbacks vom 2026-09-19 (lief dort fehlerfrei),
-// --sim ist noch nicht gegen einen Simulator gelaufen (es gibt noch keine iOS Runtime).
+// --sim-prepare und --sim-open: gegen den Simulator iPhone 17 (iOS 27.0) am 2026-09-20 getestet.
 
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -29,8 +33,8 @@ const APP_ID = "de.klanlabs.tpos.player";
 const CALLBACK = "tpos://auth/callback";
 const PENDING_KEY = "tpos.auth.pendingLoginRequestedAt";
 const mode = process.argv[2];
-if (mode !== "--check" && mode !== "--sim") {
-  console.error("Aufruf: node scripts/sim-login.mjs --check | --sim");
+if (!["--check", "--sim-prepare", "--sim-open", "--sim-open-used"].includes(mode)) {
+  console.error("Aufruf: node scripts/sim-login.mjs --check | --sim-prepare | --sim-open | --sim-open-used");
   process.exit(2);
 }
 
@@ -93,24 +97,43 @@ check(
 );
 if (failed || mode === "--check") process.exit(failed ? 1 : 0);
 
-// 3. Simulator: Wartestatus setzen, dann Adresse oeffnen
+
+// 3. Simulator
 function simctl(...args) {
   return execFileSync("xcrun", ["simctl", ...args], { encoding: "utf8" }).trim();
 }
+
+if (mode === "--sim-open-used") {
+  // Zweiter Aufruf desselben Links: GoTrue antwortet mit einem Fehler Fragment statt mit Tokens
+  const again = await fetch(own.link, { redirect: "manual" });
+  const usedLocation = again.headers.get("location") ?? "";
+  const usedKeys = usedLocation.includes("#") ? names(usedLocation.slice(usedLocation.indexOf("#") + 1)) : [];
+  const codeAt = usedLocation.match(/error_code=([a-z_]+)/);
+  check("Zweiter Aufruf liefert Fehler Fragment", usedKeys.includes("error"), `Schluessel: ${usedKeys.join(",") || "-"}, error_code ${codeAt?.[1] ?? "-"}`);
+  simctl("openurl", "booted", usedLocation);
+  console.log("Verbrauchten Link geoeffnet. Ergebnis per Screenshot pruefen.");
+  process.exit(0);
+}
+
+if (mode === "--sim-open") {
+  simctl("openurl", "booted", location);
+  console.log("Adresse geoeffnet (iOS Dialog antippen). Ergebnis per Screenshot pruefen.");
+  process.exit(0);
+}
+
+// --sim-prepare: Wartestatus setzen, solange die App nicht laeuft (sie haelt AsyncStorage im Speicher)
 const container = simctl("get_app_container", "booted", APP_ID, "data");
-const manifest = execFileSync("find", [container, "-name", "manifest.json", "-path", "*RCTAsyncLocalStorage*"], {
+const storageDir = execFileSync("find", [container, "-type", "d", "-name", "RCTAsyncLocalStorage_V1"], {
   encoding: "utf8",
 })
   .split("\n")
   .find(Boolean);
-check("AsyncStorage Manifest im Simulator gefunden", Boolean(manifest && existsSync(manifest)));
-if (!manifest) process.exit(1);
+check("AsyncStorage Ordner im Simulator gefunden", Boolean(storageDir));
+if (!storageDir) process.exit(1);
+const manifest = join(storageDir, "manifest.json");
 
 try { simctl("terminate", "booted", APP_ID); } catch { /* lief nicht */ }
-const data = JSON.parse(readFileSync(manifest, "utf8"));
+const data = existsSync(manifest) ? JSON.parse(readFileSync(manifest, "utf8")) : {};
 data[PENDING_KEY] = String(Date.now());
 writeFileSync(manifest, JSON.stringify(data));
-simctl("launch", "booted", APP_ID);
-await new Promise((r) => setTimeout(r, 4000));
-simctl("openurl", "booted", location);
-console.log("Adresse geoeffnet. Ergebnis per Screenshot pruefen (mcp control screenshot).");
+console.log("Wartestatus gesetzt, App beendet. App neu starten, mit Metro verbinden, dann --sim-open.");
