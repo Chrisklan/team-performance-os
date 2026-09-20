@@ -4,6 +4,7 @@
 #
 #   scripts/supabase-auth-config.sh get                 -> nur Hook-Felder und jwt_exp
 #   scripts/supabase-auth-config.sh patch '<json>'      -> PATCH, danach wieder get
+#   scripts/supabase-auth-config.sh mail                -> Mail Limits und SMTP Art (nur lesen, keine Zugangsdaten)
 #   scripts/supabase-auth-config.sh allowlist           -> site_url und uri_allow_list (nur lesen)
 #   scripts/supabase-auth-config.sh allowlist-add <url> -> <url> zur uri_allow_list hinzufuegen (Merge, nichts entfernt), danach allowlist
 set -euo pipefail
@@ -28,8 +29,18 @@ print("site_url      :", d.get("site_url"))
 print("uri_allow_list:", d.get("uri_allow_list"))'
 }
 
+show_mail() {
+  curl -sf -H "Authorization: Bearer $T" "$API" | python3 -c '
+import sys, json
+d = json.load(sys.stdin)
+keys = ["rate_limit_email_sent", "rate_limit_otp", "smtp_max_frequency", "mailer_otp_exp", "external_email_enabled", "mailer_autoconfirm"]
+for k in keys: print(k, ":", d.get(k))
+print("eigenes SMTP:", "ja" if d.get("smtp_host") else "nein (Supabase Standard)")'
+}
+
 case "${1:-get}" in
   get) show ;;
+  mail) show_mail ;;
   allowlist) show_allowlist ;;
   allowlist-add)
     NEW=$(curl -sf -H "Authorization: Bearer $T" "$API" | python3 -c '
