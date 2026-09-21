@@ -125,11 +125,13 @@ for (const r of regions) {
   if (!legacy && r.active_from !== meta.stichtag) fail(`${r.key}: neuer Schlüssel muss active_from ${meta.stichtag} tragen`);
 }
 
-// Altliste im Player gegen die feste Liste oben prüfen, falls das Repo daneben liegt
+// Altliste im Player gegen die feste Liste oben prüfen, falls das Repo daneben liegt.
+// Seit AP-44b trägt der Editor keine Chipliste mehr (der Katalog steht in src/bodymap/catalog.ts,
+// Abgleich: scripts/bodymap/check-catalog-sync.mjs im Player). Ohne Chipliste gibt es nichts zu prüfen.
 if (existsSync(playerEditor)) {
   const src = readFileSync(playerEditor, 'utf8');
   const found = [...src.matchAll(/\{ key: '([a-z_]+)', label:/g)].map((m) => m[1]).sort();
-  if (found.join() !== [...LEGACY_19].sort().join()) fail(`BodyMapEditor.tsx enthält andere Schlüssel als die feste Liste der 19 (${found.length} gefunden)`);
+  if (found.length > 0 && found.join() !== [...LEGACY_19].sort().join()) fail(`BodyMapEditor.tsx enthält andere Schlüssel als die feste Liste der 19 (${found.length} gefunden)`);
 }
 
 const open = regions.filter((r) => r.standard_area_open);
