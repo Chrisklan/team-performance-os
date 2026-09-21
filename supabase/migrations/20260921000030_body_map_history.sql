@@ -32,8 +32,10 @@
 -- * Nur physio und doctor des eigenen Teams (ADR-009). Trainer, Athletiktrainer, Admin
 --   und die Spielerin selbst bekommen FORBIDDEN. Die Spielerin liest ihren Verlauf
 --   ueber die andere Tuer.
--- * Die Person muss im eigenen Team eine gueltige Rolle player haben. Fremdes Team,
---   unbekannte Id und NULL geben dieselbe Antwort, es gibt kein Orakel fuer Ids.
+-- * Die Person muss im eigenen Team aktiv sein und eine gueltige Rolle player haben.
+--   Fremdes Team, unbekannte Id, NULL, deaktivierte und geshredderte Person geben
+--   dieselbe Antwort, es gibt kein Orakel fuer Ids. (Gegenlesung 2026-09-21: is_active
+--   kam dazu, der Shred beendet die Rolle nicht.)
 -- * Jedes Oeffnen schreibt VOR der Antwort eine Zeile in app.access_log: subject die
 --   Spielerin, actor die Medizinperson, resource daily_checkins.body_map, scope_date
 --   Beginn des Fensters. Genau diese Tabelle liest app.rpc_get_my_access_log, also die
@@ -154,16 +156,20 @@ BEGIN
   v_team_id  := app.auth_team_id();
   v_actor_id := app.auth_person_id();
 
-  -- Die Person muss im eigenen Team Spielerin sein. Fremdes Team, unbekannte Id und
-  -- NULL antworten gleich.
+  -- Die Person muss im eigenen Team aktive Spielerin sein. Fremdes Team, unbekannte
+  -- Id, NULL, deaktivierte und geshredderte Person antworten gleich. is_active steht
+  -- hier, weil rpc_shred_person die Rolle nicht beendet: ohne diese Bedingung oeffnete
+  -- die Tuer eine Sicht auf eine Person, die es nicht mehr gibt, und schriebe danach
+  -- eine Zeile in den access_log, die der Shred fuer diese Person gerade geloescht hat.
   IF p_person_id IS NULL OR NOT EXISTS (
     SELECT 1
       FROM app.persons pe
       JOIN app.role_assignments ra
         ON ra.person_id = pe.id AND ra.team_id = pe.team_id
-     WHERE pe.id      = p_person_id
-       AND pe.team_id = v_team_id
-       AND ra.role    = 'player'
+     WHERE pe.id        = p_person_id
+       AND pe.team_id   = v_team_id
+       AND pe.is_active
+       AND ra.role      = 'player'
        AND ra.valid_from <= now()
        AND (ra.valid_to IS NULL OR ra.valid_to > now())
   ) THEN

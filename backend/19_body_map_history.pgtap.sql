@@ -15,7 +15,7 @@
 
 BEGIN;
 SET search_path = public, pgtap;
-SELECT plan(61);
+SELECT plan(75);
 
 INSERT INTO app.teams (id, name, timezone, squad_type) VALUES
   ('19191919-1919-1919-1919-191919191919', 'Verlauf Kader',  'Europe/Berlin', 'frauen'),
@@ -305,6 +305,125 @@ RESET ROLE;
 
 SELECT is((SELECT count(*)::text FROM app.access_log), current_setting('tpos.log_before'),
   'Keine der Ablehnungen hat eine Zeile in den access_log geschrieben');
+
+-- ---------------------------------------------------------------------------
+-- Gegenlesung 2026-09-21 (Rollen und Protokoll) (14)
+--
+-- Wer die Rolle nur behauptet, kommt nicht hinein: die Helper bestaetigen den
+-- Claim gegen die Datenbank. Und das Protokoll ueberlebt den Loeschpfad nicht
+-- als Zeile ueber eine Person, die es nicht mehr gibt.
+-- ---------------------------------------------------------------------------
+
+-- Ein Oeffnen legt keine Kopie im audit_log an: access_log traegt keinen
+-- Audit Trigger, und in der Zeile steht kein Gesundheitsinhalt.
+SELECT set_config('tpos.audit_before', (SELECT count(*)::text FROM app.audit_log), true);
+SET ROLE authenticated;
+SELECT app._t_jwt19('f2000000-0000-0000-0000-000000000004', 'physio');
+SELECT public.rpc_body_map_region_reports('f1000000-0000-0000-0000-000000000001', 28);
+RESET ROLE;
+SELECT is((SELECT count(*)::text FROM app.audit_log), current_setting('tpos.audit_before'),
+  'Ein Oeffnen der Physio Sicht erzeugt keine neue Zeile im audit_log (keine Kopie von Gesundheitsdaten)');
+
+-- Spielerin C: Physio oeffnet, Admin shreddert, danach ist die Sicht zu.
+INSERT INTO app.persons (id, team_id, display_name, auth_user_id, shirt_number) VALUES
+  ('f1000000-0000-0000-0000-000000000010', '19191919-1919-1919-1919-191919191919', 'Spielerin C', 'f2000000-0000-0000-0000-000000000010', 11);
+INSERT INTO app.role_assignments (team_id, person_id, role, valid_from) VALUES
+  ('19191919-1919-1919-1919-191919191919', 'f1000000-0000-0000-0000-000000000010', 'player', now() - interval '1 day');
+INSERT INTO app.daily_checkins (team_id, person_id, date, body_map, pain_max, sleep_quality) VALUES
+  ('19191919-1919-1919-1919-191919191919', 'f1000000-0000-0000-0000-000000000010', app._t_today19(),
+   '[{"region":"knie_r","pain":5}]'::jsonb, 5, 6);
+
+SET ROLE authenticated;
+SELECT app._t_jwt19('f2000000-0000-0000-0000-000000000004', 'physio');
+SELECT public.rpc_body_map_region_reports('f1000000-0000-0000-0000-000000000010', 28);
+RESET ROLE;
+SELECT is((SELECT count(*)::int FROM app.access_log WHERE subject_id = 'f1000000-0000-0000-0000-000000000010'), 1,
+  'Spielerin C: das Oeffnen steht im access_log');
+
+SET ROLE authenticated;
+SELECT app._t_jwt19('f2000000-0000-0000-0000-000000000007', 'admin');
+SELECT app.rpc_shred_person('f1000000-0000-0000-0000-000000000010');
+RESET ROLE;
+SELECT is((SELECT count(*)::int FROM app.access_log WHERE subject_id = 'f1000000-0000-0000-0000-000000000010'), 0,
+  'Der Shred raeumt die Zeile der Physio Sicht mit ab (Betroffenenzeile)');
+
+SET ROLE authenticated;
+SELECT app._t_jwt19('f2000000-0000-0000-0000-000000000004', 'physio');
+SELECT throws_ok($$SELECT public.rpc_body_map_region_reports('f1000000-0000-0000-0000-000000000010')$$,
+  '42501', 'FORBIDDEN: daily_checkins.body_map', 'Physio: geshredderte Spielerin abgewiesen, obwohl ihre Rolle player weiter gilt');
+RESET ROLE;
+SELECT is((SELECT count(*)::int FROM app.access_log WHERE subject_id = 'f1000000-0000-0000-0000-000000000010'), 0,
+  'Nach dem Shred entsteht keine neue Zeile ueber die geshredderte Person');
+
+-- Deaktivierte Spielerin (Spielerin B), nicht geshreddert: gleiche Antwort.
+UPDATE app.persons SET is_active = false WHERE id = 'f1000000-0000-0000-0000-000000000002';
+SET ROLE authenticated;
+SELECT app._t_jwt19('f2000000-0000-0000-0000-000000000004', 'physio');
+SELECT throws_ok($$SELECT public.rpc_body_map_region_reports('f1000000-0000-0000-0000-000000000002')$$,
+  '42501', 'FORBIDDEN: daily_checkins.body_map', 'Physio: deaktivierte Spielerin abgewiesen');
+RESET ROLE;
+
+-- Der Claim allein reicht nicht: die Datenbank bestaetigt ihn bei jedem Aufruf.
+SET ROLE authenticated;
+SELECT app._t_jwt19('f2000000-0000-0000-0000-000000000003', 'physio');
+SELECT throws_ok($$SELECT public.rpc_body_map_region_reports('f1000000-0000-0000-0000-000000000001')$$,
+  '42501', 'FORBIDDEN: daily_checkins.body_map', 'Token sagt physio, die Datenbank sagt coach: abgewiesen');
+RESET ROLE;
+
+-- Personalunion: eine Person hat keine zweite Rolle neben der aktiven (ADR-009 Punkt 4).
+SELECT throws_ok($$INSERT INTO app.role_assignments (team_id, person_id, role, valid_from)
+  VALUES ('19191919-1919-1919-1919-191919191919', 'f1000000-0000-0000-0000-000000000003', 'physio', now())$$,
+  '23P01', NULL, 'Personalunion: die Trainerin bekommt keine zweite, gleichzeitige Rolle physio');
+
+-- Physio deaktiviert, dann Rolle beendet: der noch gueltige Token oeffnet nichts mehr.
+UPDATE app.persons SET is_active = false WHERE id = 'f1000000-0000-0000-0000-000000000004';
+SET ROLE authenticated;
+SELECT app._t_jwt19('f2000000-0000-0000-0000-000000000004', 'physio');
+SELECT throws_ok($$SELECT public.rpc_body_map_region_reports('f1000000-0000-0000-0000-000000000001')$$,
+  '42501', 'FORBIDDEN: daily_checkins.body_map', 'Physio deaktiviert: der noch gueltige Token oeffnet nichts');
+RESET ROLE;
+UPDATE app.persons SET is_active = true WHERE id = 'f1000000-0000-0000-0000-000000000004';
+
+UPDATE app.role_assignments SET valid_to = now() - interval '1 second'
+ WHERE person_id = 'f1000000-0000-0000-0000-000000000004';
+SET ROLE authenticated;
+SELECT app._t_jwt19('f2000000-0000-0000-0000-000000000004', 'physio');
+SELECT throws_ok($$SELECT public.rpc_body_map_region_reports('f1000000-0000-0000-0000-000000000001')$$,
+  '42501', 'FORBIDDEN: daily_checkins.body_map', 'Rolle physio beendet: der noch gueltige Token oeffnet nichts');
+RESET ROLE;
+UPDATE app.role_assignments SET valid_to = NULL
+ WHERE person_id = 'f1000000-0000-0000-0000-000000000004';
+
+-- Der Shred der Medizinperson: ihre Zeilen bleiben als Handelnde stehen (Entscheidung
+-- AP-39), die Spielerin sieht sie weiter, nur der Name ist weg.
+SELECT set_config('tpos.actor_rows', (SELECT count(*)::text FROM app.access_log
+                                       WHERE actor_id = 'f1000000-0000-0000-0000-000000000004'), true);
+SELECT set_config('tpos.a_rows', (SELECT count(*)::text FROM app.access_log
+                                   WHERE actor_id = 'f1000000-0000-0000-0000-000000000004'
+                                     AND subject_id = 'f1000000-0000-0000-0000-000000000001'
+                                     AND resource = 'daily_checkins.body_map'), true);
+SET ROLE authenticated;
+SELECT app._t_jwt19('f2000000-0000-0000-0000-000000000007', 'admin');
+SELECT app.rpc_shred_person('f1000000-0000-0000-0000-000000000004');
+RESET ROLE;
+SELECT ok(current_setting('tpos.actor_rows')::int > 0
+      AND (SELECT count(*)::int FROM app.access_log WHERE actor_id = 'f1000000-0000-0000-0000-000000000004')
+          = current_setting('tpos.actor_rows')::int,
+  'Shred der Medizinperson: ihre Zeilen als Handelnde bleiben unveraendert stehen');
+SET ROLE authenticated;
+SELECT app._t_jwt19('f2000000-0000-0000-0000-000000000001', 'player');
+SELECT is((SELECT count(*)::int FROM app.rpc_get_my_access_log()
+            WHERE actor_id = 'f1000000-0000-0000-0000-000000000004' AND resource = 'daily_checkins.body_map'),
+  current_setting('tpos.a_rows')::int,
+  'Spielerin A sieht die Zugriffe der geshredderten Medizinperson weiter');
+RESET ROLE;
+SELECT ok((SELECT display_name LIKE 'SCRAPED-%' FROM app.persons WHERE id = 'f1000000-0000-0000-0000-000000000004'),
+  'Die Zeile der Medizinperson ist anonymisiert, die id bleibt der Verweis');
+SET ROLE authenticated;
+SELECT app._t_jwt19('f2000000-0000-0000-0000-000000000004', 'physio');
+SELECT throws_ok($$SELECT public.rpc_body_map_region_reports('f1000000-0000-0000-0000-000000000001')$$,
+  '42501', 'FORBIDDEN: daily_checkins.body_map', 'Geshredderte Medizinperson: der Token oeffnet nichts mehr');
+RESET ROLE;
 
 SELECT * FROM finish();
 ROLLBACK;
