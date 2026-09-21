@@ -37,6 +37,23 @@ if (!meta.stichtag || !meta.legacy_active_from) fail('_meta.stichtag oder _meta.
 const areas = meta.standard_areas ?? {};
 const groups = new Set((meta.groups ?? []).map((g) => g.id));
 
+// Figurvarianten (AP-43): die sechs Silhouetten aus AP-44a. Sie stehen hier,
+// weil das Feld svg des Tippunkts serverseitig dagegen geprueft wird.
+const variants = Array.isArray(meta.figure_variants) ? meta.figure_variants : [];
+if (variants.length !== 6) fail(`_meta.figure_variants: 6 erwartet, ${variants.length} gefunden`);
+const variantKeys = new Set();
+const variantSorts = new Set();
+for (const v of variants) {
+  const id = v?.key ?? '(ohne key)';
+  if (!/^(weiblich|maennlich|neutral)_(vorne|hinten)$/.test(v?.key ?? '')) fail(`${id}: key passt nicht auf <figur>_<ansicht>`);
+  if (v?.key !== `${v?.figur}_${v?.ansicht}`) fail(`${id}: key, figur und ansicht passen nicht zusammen`);
+  if (!Number.isInteger(v?.sort)) fail(`${id}: sort fehlt oder ist keine ganze Zahl`);
+  if (variantKeys.has(v?.key)) fail(`${id}: key doppelt`);
+  if (variantSorts.has(v?.sort)) fail(`${id}: sort doppelt`);
+  variantKeys.add(v?.key);
+  variantSorts.add(v?.sort);
+}
+
 const FIELDS = ['key', 'label_de', 'side', 'lateral', 'standard_area', 'sort', 'active_from'];
 const keys = new Set();
 const sorts = new Set();

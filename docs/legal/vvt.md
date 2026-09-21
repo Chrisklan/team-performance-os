@@ -36,6 +36,7 @@
 | Trikotnummer | `public.players.squad_number`, `app.persons.shirt_number` | Identifikation im Kader |
 | Position | `public.players.position`, `app.persons.person_position` | Team-Organisation |
 | Auth-ID | `app.persons.auth_user_id`, `public.profiles.id` | Authentifizierung |
+| Darstellungspräferenz Body Map | `app.persons.body_map_figure` | Welche der drei Silhouetten dem Spieler angezeigt wird (`aus_dem_team`, `weiblich`, `maennlich`, `neutral`). **Kein Geschlechtsfeld:** die Angabe trägt außerhalb der Zeichnung keine Bedeutung, wird nirgends ausgewertet und ist für niemanden im Team sichtbar außer der Person selbst. Vorgabe `aus_dem_team` folgt `app.teams.squad_type`, einer Eigenschaft der Mannschaft (AP-43) |
 
 ### 3.2 Leistungsdaten (Art. 6 Abs. 1 lit. f)
 | Datenfeld | Tabelle | Zweck |
@@ -54,7 +55,9 @@
 | Diagnose | `public.medical_records.diagnosis` | Medizinische Dokumentation |
 | Symptome | `public.medical_records.symptoms` | Medizinische Dokumentation |
 | Behandlung | `public.medical_records.treatment` | Medizinische Dokumentation |
-| Body-Map-Regionen | `public.daily_checkins` (JSON) | Schmerz-Lokalisation |
+| Body-Map-Regionen | `public.daily_checkins` (JSON), `app.daily_checkins.body_map` (JSON) | Schmerz-Lokalisation |
+| Tippunkt auf der Silhouette | `app.daily_checkins.body_map[].point` (JSON) | Stelle innerhalb der Region, auf die der Spieler selbst gezeigt hat. Zwei Koordinaten von 0 bis 1, normiert auf die Zeichnung, nicht auf den Bildschirm. Rein beschreibend: nichts rechnet damit, der Bereitschaftswert liest ihn nicht (AP-43) |
+| Figur der Silhouette | `app.daily_checkins.body_map[].svg` (JSON) | Welche Zeichnung und welche Version der Punkt meint, zum Beispiel `weiblich_vorne@1`. Ohne sie wäre der Punkt nach einer Überarbeitung der Zeichnung nicht mehr lesbar |
 
 ### 3.4 Protokolldaten
 | Datenfeld | Tabelle | Zweck |

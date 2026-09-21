@@ -12,8 +12,13 @@
 --      neue Kopien, die der Pfad nicht mehr erfasst.
 --   4. Auskunft und Loeschung laufen auseinander. rpc_export_my_data nennt einen
 --      Speicherort, den der Shred nicht kennt.
+--   5. AP-43: der Tippunkt der Body Map bleibt stehen. Der Pfad adressiert das
+--      audit_log ueber person_id im jsonb und nicht ueber eine Feldliste, also
+--      SOLLTE ein neues Feld in body_map gedeckt sein. Der letzte Block der
+--      Suite belegt das mit einem echten Tippunkt, statt es anzunehmen.
 --
--- Voraussetzung: 08_reconciling.sql, 09_rpcs.sql, 14_shred_person.sql.
+-- Voraussetzung: 08_reconciling.sql, 09_rpcs.sql, 16_body_region.sql,
+-- 11_checkin_submit.sql, 17_squad_figure.sql, 14_shred_person.sql.
 -- =============================================================================
 
 BEGIN;
@@ -52,8 +57,8 @@ INSERT INTO app.role_assignments (team_id, person_id, role) VALUES
 
 -- Nutzdaten von P, in allen Speicherorten, die rpc_export_my_data nennt.
 INSERT INTO app.daily_checkins (team_id, person_id, date, body_map, pain_max, sleep_quality) VALUES
-  ('e0000000-0000-0000-0000-000000000001', 'e1000000-0000-0000-0000-000000000004', '2026-09-01', '[{"region":"knee_left","pain":4}]'::jsonb, 4, 6),
-  ('e0000000-0000-0000-0000-000000000001', 'e1000000-0000-0000-0000-000000000004', '2026-09-02', '[{"region":"knee_left","pain":2}]'::jsonb, 2, 7);
+  ('e0000000-0000-0000-0000-000000000001', 'e1000000-0000-0000-0000-000000000004', '2026-09-01', '[{"region":"knie_l","pain":4}]'::jsonb, 4, 6),
+  ('e0000000-0000-0000-0000-000000000001', 'e1000000-0000-0000-0000-000000000004', '2026-09-02', '[{"region":"knie_l","pain":2}]'::jsonb, 2, 7);
 
 INSERT INTO app.readiness_scores (team_id, person_id, date, score_total, band, factors) VALUES
   ('e0000000-0000-0000-0000-000000000001', 'e1000000-0000-0000-0000-000000000004', '2026-09-01', 71.5, 'moderate', '{"sleep": 6, "muscle": 4}'::jsonb);
@@ -101,7 +106,7 @@ SELECT cmp_ok(app._t_audit_hits('Paula Loeschpfad'), '>', 0::bigint,
   'Ausgangslage: der Anzeigename von P steht im audit_log');
 SELECT cmp_ok(app._t_audit_hits('1999-03-17'), '>', 0::bigint,
   'Ausgangslage: das Geburtsdatum von P steht im audit_log');
-SELECT cmp_ok(app._t_audit_hits('knee_left'), '>', 0::bigint,
+SELECT cmp_ok(app._t_audit_hits('knie_l'), '>', 0::bigint,
   'Ausgangslage: die Body Map von P steht im audit_log');
 SELECT is((SELECT count(*) FROM app.daily_checkins WHERE person_id = 'e1000000-0000-0000-0000-000000000004'), 2::bigint,
   'Ausgangslage: P hat zwei Check-Ins');
@@ -156,7 +161,7 @@ SELECT is(app._t_audit_hits('Paula Loeschpfad'), 0::bigint,
   'audit_log: Suche nach dem Anzeigenamen von P findet 0 Treffer');
 SELECT is(app._t_audit_hits('1999-03-17'), 0::bigint,
   'audit_log: Suche nach dem Geburtsdatum von P findet 0 Treffer');
-SELECT is(app._t_audit_hits('knee_left'), 0::bigint,
+SELECT is(app._t_audit_hits('knie_l'), 0::bigint,
   'audit_log: Suche nach der Body Map von P findet 0 Treffer');
 SELECT is(app._t_audit_hits('max 60 min'), 0::bigint,
   'audit_log: Suche nach dem Freitext der Freigabe von P findet 0 Treffer');
@@ -327,6 +332,71 @@ SELECT is((SELECT count(*) FROM app.daily_checkins     WHERE person_id  = 'e1000
         + (SELECT count(*) FROM app.access_log         WHERE subject_id = 'e1000000-0000-0000-0000-000000000004'), 0::bigint,
   'Nach dem Shred ist jeder Speicherort aus dem Export fuer P leer');
 
+
+-- =============================================================================
+-- AP-43: Tippunkt und Figur im Loeschpfad
+--
+-- Der Punkt ist ein weiteres Art.-9-Detail (Modul-Body-Map 3.1, Bedingung 3).
+-- Die Annahme war: er ist gedeckt, weil rpc_shred_person v2 das audit_log ueber
+-- person_id im jsonb adressiert und nicht ueber eine Feldliste. Annahme reicht
+-- hier nicht, der Block misst es.
+--
+-- R ist eine frische Person. Ihr Check-In laeuft ueber den echten Schreibweg
+-- rpc_submit_checkin, nicht per INSERT, damit auch der Audit Trigger so
+-- ausloest wie im Betrieb.
+-- =============================================================================
+
+INSERT INTO app.persons (id, team_id, display_name, person_position, auth_user_id, birth_date) VALUES
+  ('e1000000-0000-0000-0000-000000000006', 'e0000000-0000-0000-0000-000000000001', 'Rosa Tippunkt', 'player', 'e2000000-0000-0000-0000-000000000006', '2003-05-11');
+INSERT INTO app.role_assignments (team_id, person_id, role) VALUES
+  ('e0000000-0000-0000-0000-000000000001', 'e1000000-0000-0000-0000-000000000006', 'player');
+
+-- Eine Praeferenz, die nach dem Shred nicht mehr an der namenlosen Zeile haengen soll.
+UPDATE app.persons SET body_map_figure = 'maennlich'
+ WHERE id = 'e1000000-0000-0000-0000-000000000006';
+
+-- Markante Werte, damit die Volltextsuche im audit_log eindeutig ist.
+SELECT app._t_shred_jwt('e2000000-0000-0000-0000-000000000006', 'player');
+SELECT lives_ok(
+  $$SELECT app.rpc_submit_checkin(current_date, 470, 7, 6, 6, 4, 7, 7, 7,
+      '[{"region":"knie_l","pain":5,"art":"gelenkig","point":[0.1234567,0.7654321],"svg":"maennlich_hinten@3"}]'::jsonb)$$,
+  'R gibt einen Check-In mit Tippunkt ueber den echten Schreibweg ab');
+
+SELECT is((SELECT body_map -> 0 ->> 'svg' FROM app.daily_checkins
+            WHERE person_id = 'e1000000-0000-0000-0000-000000000006'),
+  'maennlich_hinten@3', 'Der Tippunkt samt Figur liegt in app.daily_checkins');
+
+-- Der Beweis ist nur etwas wert, wenn vorher wirklich Klartext dasteht.
+SELECT cmp_ok(app._t_audit_hits('0.1234567'), '>', 0::bigint,
+  'Vor dem Shred steht der Punktwert als Klartext im audit_log. Der Trigger kopiert ganze Zeilen');
+SELECT cmp_ok(app._t_audit_hits('maennlich_hinten@3'), '>', 0::bigint,
+  'Vor dem Shred steht auch die Figur im audit_log');
+
+SELECT app._t_shred_jwt('e2000000-0000-0000-0000-000000000001', 'admin');
+SELECT lives_ok($$SELECT app.rpc_shred_person('e1000000-0000-0000-0000-000000000006')$$,
+  'R wird geschreddert');
+
+SELECT is(app._t_audit_hits('0.1234567'), 0::bigint,
+  'Nach dem Shred null Treffer auf den Punktwert im ganzen audit_log');
+SELECT is(app._t_audit_hits('0.7654321'), 0::bigint,
+  'Auch auf die zweite Koordinate null Treffer');
+SELECT is(app._t_audit_hits('maennlich_hinten@3'), 0::bigint,
+  'Und null Treffer auf die Figur. Ohne sie waere der Punkt ohnehin nicht lesbar');
+SELECT is(app._t_audit_hits('Rosa Tippunkt'), 0::bigint,
+  'Der Anzeigename von R ist ebenfalls weg');
+
+SELECT is((SELECT count(*) FROM app.daily_checkins WHERE person_id = 'e1000000-0000-0000-0000-000000000006'),
+  0::bigint, 'Die Check-In Zeile von R ist geloescht, nicht nur maskiert');
+SELECT is((SELECT body_map_figure::text FROM app.persons WHERE id = 'e1000000-0000-0000-0000-000000000006'),
+  'aus_dem_team', 'Die Darstellungspraeferenz faellt auf die Vorgabe zurueck');
+
+-- Der Nachweis nach Art. 5 Abs. 2 bleibt: die Zeilen stehen weiter, nur ohne Inhalt.
+SELECT cmp_ok(
+  (SELECT count(*) FROM app.audit_log
+    WHERE table_name = 'daily_checkins'
+      AND (old_row ? 'shredded_at' OR new_row ? 'shredded_at')), '>', 0::bigint,
+  'Die geleerten Audit Zeilen stehen weiter da, mit Zeitpunkt, Tabelle und row_id. '
+  'Ein Shred taugt nicht zum Verwischen von Spuren (Art. 5 Abs. 2)');
 
 SELECT * FROM finish();
 ROLLBACK;

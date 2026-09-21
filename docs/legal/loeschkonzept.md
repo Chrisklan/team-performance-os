@@ -13,6 +13,11 @@ Dieses Dokument beschreibt die technische und organisatorische Umsetzung der Lö
 
 ## 2. Löschverfahren
 
+> **Nachtrag 2026-09-21 (AP-43), Body Map:** Der Tippunkt (`body_map[].point`) und die Figur (`body_map[].svg`) im täglichen Check-In sind Gesundheitsdaten nach Art. 9 und vom Löschpfad `app.rpc_shred_person` vollständig erfasst: die Check-In Zeile wird gelöscht, und die Kopien, die der Audit Trigger davon angelegt hat, werden im selben Aufruf inhaltlich geleert. Der Pfad adressiert das Protokoll über die Person und nicht über eine Liste von Feldern, deshalb wirkt er auch für später hinzukommende Felder. Belegt, nicht angenommen: `backend/14_shred_person.pgtap.sql` legt einen Check-In mit einem markanten Tippunkt an, schreddert die Person und findet den Wert danach im gesamten Protokoll null Mal.
+>
+> Die Darstellungspräferenz `app.persons.body_map_figure` fällt beim Shred auf die Vorgabe `aus_dem_team` zurück. Sie ist kein Geschlechtsfeld, an einer pseudonymisierten Zeile wäre sie aber eine Restangabe ohne Zweck.
+
+
 ### 2.1 Standard-Löschung (Soft Delete + Cascade)
 
 **Auslöser:** Vertragsende eines Spielers/Trainers, Widerruf der Einwilligung, Auskunftsbegehren.

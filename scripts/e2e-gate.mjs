@@ -141,7 +141,7 @@ try {
     p_mental_mood: pick.mood,
     p_mental_motivation: pick.mot,
     p_training_readiness: 6,
-    p_body_map: [{ region: "knee_right", pain: 3, art: "muskulaer" }],
+    p_body_map: [{ region: "knie_r", pain: 3, art: "muskulaer" }],
   };
 
   // 1. Spieler schreibt ueber die Tuer

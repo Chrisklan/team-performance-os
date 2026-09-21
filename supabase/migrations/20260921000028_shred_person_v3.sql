@@ -1,3 +1,9 @@
+-- Migration 20260921000028_shred_person_v3.sql (AP-43, Art. 17 DSGVO)
+-- Quelle: backend/14_shred_person.sql (identisch, loest 20260921000023 ab).
+-- Tests: backend/14_shred_person.pgtap.sql.
+-- Schritt 5 setzt zusaetzlich persons.body_map_figure auf die Vorgabe zurueck.
+-- Setzt Migration 20260921000026 voraus. Loescht Zeilen nur beim Shred, nicht beim Einspielen.
+
 -- =============================================================================
 -- 14_shred_person.sql — app.rpc_shred_person v2 (AP-39b, Art. 17 DSGVO)
 --

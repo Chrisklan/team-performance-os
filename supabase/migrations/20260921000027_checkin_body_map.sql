@@ -1,3 +1,9 @@
+-- Migration 20260921000027_checkin_body_map.sql (AP-43, Modul-Body-Map 3.1 und 6)
+-- Quelle: backend/11_checkin_submit.sql (identisch). Tests: backend/11_checkin_submit.pgtap.sql.
+-- Ersetzt app.rpc_submit_checkin: region wird gegen app.body_region geprueft,
+-- point und svg kommen dazu. Aendert nur die Funktion, keine Datenzeile.
+-- Setzt Migration 20260921000025 voraus.
+
 -- =============================================================================
 -- 11_checkin_submit.sql — Check-In der Player-App direkt nach app.* (AP-33)
 -- ADR-016 Weg (b): app.rpc_submit_checkin ist der einzige Schreibweg der App.

@@ -45,7 +45,7 @@ SET ROLE authenticated;
 SELECT app._t_jwt13('d2000000-0000-0000-0000-000000000003', 'player');
 SELECT lives_ok(
   $$SELECT public.rpc_submit_checkin(current_date, 450, 8, 7, 6, 3, 8, 7, 8,
-      '[{"region":"knee_left","pain":4,"art":"muskulaer"},{"region":"back","pain":2}]'::jsonb)$$,
+      '[{"region":"knie_l","pain":4,"art":"muskulaer"},{"region":"lws_kreuz","pain":2}]'::jsonb)$$,
   'Spieler: Check-In ueber die Tuer wird gespeichert');
 RESET ROLE;
 
