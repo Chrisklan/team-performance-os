@@ -211,7 +211,11 @@ SELECT throws_ok($$SELECT app.rpc_morning_ops()$$, '42501', 'FORBIDDEN', 'Rollen
 -- =============================================================================
 
 SELECT app._t_jwt('a2000000-0000-0000-0000-000000000001', 'admin');
-SELECT is(app.rpc_shred_person('a1000000-0000-0000-0000-000000000002'), true, 'Admin shreddet den Trainer');
+-- Seit AP-39b gibt rpc_shred_person die alte auth_user_id zurueck (vorher boolean),
+-- damit das Auth Konto im zweiten Schritt ueber die Admin API geloescht werden kann.
+SELECT is(app.rpc_shred_person('a1000000-0000-0000-0000-000000000002'),
+  'a2000000-0000-0000-0000-000000000002'::uuid,
+  'Admin shreddet den Trainer und bekommt dessen alte auth_user_id zurueck');
 
 SELECT app._t_jwt('a2000000-0000-0000-0000-000000000002', 'coach');
 SELECT is(app.auth_is_staff(), false, 'Nach Shredding: auth_is_staff() = false mit altem Claim');

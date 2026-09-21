@@ -62,7 +62,10 @@ SELECT lives_ok($$SELECT * FROM app.rpc_admin_denials('2026-09-01', '2026-09-30'
 SELECT lives_ok($$SELECT * FROM app.rpc_shred_person('66666666-6666-6666-6666-666666666666')$$, 'rpc_shred_person als Admin');
 SELECT lives_ok($$SELECT * FROM app.rpc_export_my_data()$$, 'rpc_export_my_data als Admin');
 
--- Zuruecksetzen (nach shred sind Daten weg, also neu setzen)
+-- Zuruecksetzen (nach shred sind Daten weg, also neu setzen).
+-- Seit AP-39b raeumt rpc_shred_person v2 alle Speicherorte der Person, nicht mehr
+-- nur app.persons. Die Fixtures fuer Check-In, Score und Lastabweichung kommen
+-- deshalb hier ebenfalls zurueck.
 SELECT app._test_set_jwt('{"sub":"22222222-2222-2222-2222-222222222222","role":"authenticated","app_role":"admin","team_id":"11111111-1111-1111-1111-111111111111"}');
 INSERT INTO app.persons (id, team_id, display_name, person_position, auth_user_id) VALUES
   ('66666666-6666-6666-6666-666666666666', '11111111-1111-1111-1111-111111111111', 'Player User', 'player', '66666666-6666-6666-6666-666666666666')
@@ -70,6 +73,18 @@ ON CONFLICT (id) DO UPDATE SET is_active = true, display_name = 'Player User', a
 
 INSERT INTO app.medical_clearances (team_id, person_id, status, load_note, valid_from, set_by, set_by_role) VALUES
   ('11111111-1111-1111-1111-111111111111', '66666666-6666-6666-6666-666666666666', 'limited', 'max 60 min', '2026-09-01', '55555555-5555-5555-5555-555555555555', 'doctor')
+ON CONFLICT DO NOTHING;
+
+INSERT INTO app.daily_checkins (id, team_id, person_id, date, body_map) VALUES
+  ('77777777-7777-7777-7777-777777777777', '11111111-1111-1111-1111-111111111111', '66666666-6666-6666-6666-666666666666', '2026-09-01', '{"region": "knee", "value": 3}'::jsonb)
+ON CONFLICT DO NOTHING;
+
+INSERT INTO app.readiness_scores (id, team_id, person_id, date, score_total, band, factors) VALUES
+  ('99999999-9999-9999-9999-999999999999', '11111111-1111-1111-1111-111111111111', '66666666-6666-6666-6666-666666666666', '2026-09-01', 85.5, 'high', '{"sleep": 8.0}'::jsonb)
+ON CONFLICT DO NOTHING;
+
+INSERT INTO app.load_deviations (id, team_id, person_id, date, deviation, state) VALUES
+  ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '11111111-1111-1111-1111-111111111111', '66666666-6666-6666-6666-666666666666', '2026-09-01', 15.5, 'unreviewed')
 ON CONFLICT DO NOTHING;
 
 -- =============================================================================
