@@ -1,21 +1,26 @@
 "use client";
 
 // Team Performance OS — DetailDrawer.
-// Read-only Drilldown: voller 5-Faktor-Breakdown, vergrößerte Sparkline mit
-// deskriptiver Baseline-Abweichung, Heute-Teilnahme, Medical NUR Badge + Freigabe.
+// Read-only Drilldown: Bereitschaft als Zustandsklasse, vergrößerter
+// Baseline-Trend, Heute-Teilnahme, Medical NUR Badge + Freigabe.
 // Escape schließt, Fokus wandert beim Öffnen in den Drawer und bleibt darin (Tab-Trap).
+//
+// Am 2026-09-22 entfallen (Befund N7): der Readiness-Zahlwert, der
+// 5-Faktor-Breakdown und die Zeile "% vom 4-Wo-Schnitt". Alle drei beruhen auf
+// score_total oder factors, und beide sind für coach und athletic_coach in der
+// kanonischen Matrix fett mit "-" markiert. Die Abweichungszeile war dabei der
+// schärfste Fall: das tägliche Delta ist genau das Inferenz-Leck aus Modul
+// Abschnitt 3. Sie kommt nicht in anderer Form zurück.
 
 import { useEffect, useRef } from "react";
 import {
-  FACTOR_ORDER,
   attendanceLabel,
-  baselineDeviationPct,
-  factorLabels,
   medicalClearanceLabel,
   medicalLabel,
   todayEventLabel,
 } from "@/lib/trainer/aggregate";
 import type { KaderMember, MedicalStatus } from "@/lib/trainer/types";
+import { ReadinessBandMeter } from "./ReadinessBandMeter";
 import { ReadinessPulsSparkline } from "./ReadinessPulsSparkline";
 
 const MEDICAL_ICON: Record<MedicalStatus, string> = {
@@ -78,9 +83,7 @@ export function DetailDrawer({ member, onClose }: DetailDrawerProps) {
     medicalClearance,
     attendance,
     todayEvent,
-    hasCheckIn,
   } = member;
-  const deviation = baselineDeviationPct(member);
   const clearanceLabel = medicalClearanceLabel(medicalClearance);
 
   return (
@@ -116,18 +119,10 @@ export function DetailDrawer({ member, onClose }: DetailDrawerProps) {
           </button>
         </div>
 
-        <section className="flex items-center justify-between gap-4">
-          <div>
-            {hasCheckIn ? (
-              <p className="text-5xl font-bold text-ink">{readiness.value}</p>
-            ) : (
-              <p className="text-5xl font-bold text-muted">—</p>
-            )}
-            <p className="text-sm text-muted">
-              {hasCheckIn && deviation !== null
-                ? `${deviation > 0 ? "+" : ""}${deviation}% vom 4-Wo-Schnitt`
-                : "Kein Check-in"}
-            </p>
+        <section className="flex items-end justify-between gap-4">
+          <div className="flex flex-col gap-2">
+            <h3 className="text-sm font-bold text-ink">Bereitschaft heute</h3>
+            <ReadinessBandMeter band={readiness.band} variant="large" />
           </div>
           <ReadinessPulsSparkline
             series={baseline.series}
@@ -135,37 +130,10 @@ export function DetailDrawer({ member, onClose }: DetailDrawerProps) {
             width={160}
             height={56}
             variant="large"
-            ariaLabel={`Readiness-Puls Baseline-Trend für ${player.name}, 4-Wochen-Schnitt ${Math.round(
+            ariaLabel={`Baseline-Trend für ${player.name}, 4-Wochen-Schnitt ${Math.round(
               baseline.rollingAvg,
             )}`}
           />
-        </section>
-
-        <section>
-          <h3 className="mb-3 text-sm font-bold text-ink">5-Faktor-Breakdown</h3>
-          <div className="flex flex-col gap-3">
-            {FACTOR_ORDER.map((factor) => {
-              const value = readiness.factors ? readiness.factors[factor] : null;
-              return (
-                <div key={factor} className="flex items-center gap-3">
-                  <span className="w-24 shrink-0 text-sm text-muted">
-                    {factorLabels[factor]}
-                  </span>
-                  <div className="h-2 flex-1 rounded-full bg-white/5">
-                    {value !== null && (
-                      <div
-                        className="h-full rounded-full bg-muted"
-                        style={{ width: `${value}%` }}
-                      />
-                    )}
-                  </div>
-                  <span className="w-10 shrink-0 text-right text-sm text-ink">
-                    {value ?? "—"}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
         </section>
 
         <section>

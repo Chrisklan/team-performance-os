@@ -16,15 +16,8 @@ export type AttendanceStatus =
 
 export type TodayEvent = "training" | "spiel" | "none";
 
-export type ReadinessFactors = {
-  // 5-Faktor-Breakdown aus ReadinessScore.factors (Quelle: Modul Readiness Score).
-  // Werte sind bereits gewichtete, baseline-rel. Heuristik-Werte (0-100 je Faktor).
-  sleep: number;
-  recovery: number;
-  mental: number;
-  muscle: number; // MEDICINE-GATED im Quellmodul; im Coach-Payload als Wert vorhanden, aber nicht diagnostisch interpretiert
-  load: number;
-};
+// Die drei Stufen aus app.app_readiness_band. Das ist alles, was Staff sieht.
+export type ReadinessBand = "low" | "moderate" | "high";
 
 export type PlayerBaseline = {
   // rolling 4-Wo. Profil pro Metrik (Baseline.rolling_avg).
@@ -40,9 +33,16 @@ export type Player = {
   position: string; // Stammposition
 };
 
+// MEDIZIN-GATE. Staff bekommt die Zustandsklasse, nie den Zahlwert und nie die
+// Faktoren: beide sind in der kanonischen Matrix fuer coach und athletic_coach
+// fett mit "-" markiert (Modul Rollen und Medizin Gate, Abschnitt 5). Bis zum
+// 2026-09-22 lieferte app.rpc_morning_ops trotzdem value und factors mit
+// (Befund N7), seit Migration 20260922000033 traegt der Payload nur noch band.
+// Wer hier wieder ein Zahlfeld ergaenzt, hebt das Gate auf und braucht nach der
+// harten Regel des Moduls ein neues ADR. Den vollen Wert liefert
+// app.rpc_readiness_full, und die kennt nur physio, doctor und die Person selbst.
 export type ReadinessScore = {
-  value: number | null; // 0-100, null = kein Check-in heute
-  factors: ReadinessFactors | null; // null = kein Check-in
+  band: ReadinessBand | null; // null = kein Readiness-Eintrag fuer heute
 };
 
 export type KaderMember = {
