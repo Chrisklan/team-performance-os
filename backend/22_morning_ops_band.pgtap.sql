@@ -161,15 +161,16 @@ SELECT throws_ok($$SELECT score_total FROM app.readiness_scores$$, '42501', NULL
 -- 6. Medizin und self sind unveraendert
 -- ---------------------------------------------------------------------------
 SELECT app._t22_jwt('d2000000-0000-0000-0000-000000000003', 'physio');
-SELECT is((SELECT r.score_total FROM app.rpc_readiness_full('d1000000-0000-0000-0000-000000000004') r), 83.0,
+-- AP-47a: die Antwort ist jsonb, der erste Eintrag in scores ist der gesuchte Tag.
+SELECT is((app.rpc_readiness_full('d1000000-0000-0000-0000-000000000004')->'scores'->0->>'score_total')::numeric, 83.0,
   'Medizin unveraendert: physio bekommt score_total');
-SELECT is((SELECT r.factors ->> 'soreness' FROM app.rpc_readiness_full('d1000000-0000-0000-0000-000000000004') r), '0.4',
+SELECT is(app.rpc_readiness_full('d1000000-0000-0000-0000-000000000004')->'scores'->0->'factors'->>'soreness', '0.4',
   'Medizin unveraendert: physio bekommt factors');
 
 SELECT app._t22_jwt('d2000000-0000-0000-0000-000000000004', 'player');
-SELECT is((SELECT r.score_total FROM app.rpc_readiness_full('d1000000-0000-0000-0000-000000000004') r), 83.0,
+SELECT is((app.rpc_readiness_full('d1000000-0000-0000-0000-000000000004')->'scores'->0->>'score_total')::numeric, 83.0,
   'self unveraendert: die Spielerin bekommt ihren score_total');
-SELECT is((SELECT r.factors ->> 'sleep' FROM app.rpc_readiness_full('d1000000-0000-0000-0000-000000000004') r), '0.9',
+SELECT is(app.rpc_readiness_full('d1000000-0000-0000-0000-000000000004')->'scores'->0->'factors'->>'sleep', '0.9',
   'self unveraendert: die Spielerin bekommt ihre factors');
 
 -- ---------------------------------------------------------------------------

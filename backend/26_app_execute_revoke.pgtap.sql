@@ -21,22 +21,22 @@ SET search_path = public, pgtap;
 SELECT plan(19);
 
 -- ---------------------------------------------------------------------------
--- 1. Die acht sind zu (8)
+-- 1. Die zwei ohne Tuer sind zu, die sechs mit Tuer haben ihr Recht zurueck (8)
 -- ---------------------------------------------------------------------------
 SELECT ok(NOT has_function_privilege('authenticated', 'app.rpc_list_team_members()', 'EXECUTE'),
   'rpc_list_team_members: kein EXECUTE fuer authenticated');
-SELECT ok(NOT has_function_privilege('authenticated', 'app.rpc_check_ins_medical(date, date)', 'EXECUTE'),
-  'rpc_check_ins_medical: kein EXECUTE fuer authenticated');
-SELECT ok(NOT has_function_privilege('authenticated', 'app.rpc_readiness_full(uuid, date, date)', 'EXECUTE'),
-  'rpc_readiness_full: kein EXECUTE fuer authenticated');
-SELECT ok(NOT has_function_privilege('authenticated', 'app.rpc_release_deviation(uuid, text)', 'EXECUTE'),
-  'rpc_release_deviation: kein EXECUTE fuer authenticated');
-SELECT ok(NOT has_function_privilege('authenticated', 'app.rpc_get_clearance(uuid)', 'EXECUTE'),
-  'rpc_get_clearance: kein EXECUTE fuer authenticated');
-SELECT ok(NOT has_function_privilege('authenticated', 'app.rpc_set_clearance(uuid, app.app_clearance, text, date, date)', 'EXECUTE'),
-  'rpc_set_clearance: kein EXECUTE fuer authenticated');
-SELECT ok(NOT has_function_privilege('authenticated', 'app.rpc_propose_clearance(uuid, app.app_clearance, text)', 'EXECUTE'),
-  'rpc_propose_clearance: kein EXECUTE fuer authenticated');
+SELECT ok(has_function_privilege('authenticated', 'app.rpc_check_ins_medical(uuid, date, date)', 'EXECUTE'),
+  'AP-47a: rpc_check_ins_medical hat eine Tuer und deshalb sein EXECUTE zurueck (Punkt 55)');
+SELECT ok(has_function_privilege('authenticated', 'app.rpc_readiness_full(uuid, date, date)', 'EXECUTE'),
+  'AP-47a: rpc_readiness_full hat eine Tuer und deshalb sein EXECUTE zurueck (Punkt 55)');
+SELECT ok(has_function_privilege('authenticated', 'app.rpc_release_deviation(uuid, text)', 'EXECUTE'),
+  'AP-47a: rpc_release_deviation hat eine Tuer und deshalb sein EXECUTE zurueck (Punkt 55)');
+SELECT ok(has_function_privilege('authenticated', 'app.rpc_get_clearance(uuid)', 'EXECUTE'),
+  'AP-47a: rpc_get_clearance hat eine Tuer und deshalb sein EXECUTE zurueck (Punkt 55)');
+SELECT ok(has_function_privilege('authenticated', 'app.rpc_set_clearance(uuid, app.app_clearance, text, date, date)', 'EXECUTE'),
+  'AP-47a: rpc_set_clearance hat eine Tuer und deshalb sein EXECUTE zurueck (Punkt 55)');
+SELECT ok(has_function_privilege('authenticated', 'app.rpc_propose_clearance(uuid, app.app_clearance, text)', 'EXECUTE'),
+  'AP-47a: rpc_propose_clearance hat eine Tuer und deshalb sein EXECUTE zurueck (Punkt 55)');
 SELECT ok(NOT has_function_privilege('authenticated', 'app.rpc_shred_person(uuid)', 'EXECUTE'),
   'rpc_shred_person: kein EXECUTE fuer authenticated');
 

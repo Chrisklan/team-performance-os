@@ -50,6 +50,14 @@ CREATE OR REPLACE FUNCTION app._test_set_jwt(jsonb) RETURNS void LANGUAGE sql AS
   SELECT set_config('request.jwt.claims', $1::text, true);
 $$;
 
+-- AP-47a: die sechs Medizinfunktionen werfen ihre Ablehnung nicht mehr, sie geben
+-- sie zurueck (Muster D). throws_ok trifft dort also nichts mehr. _test_denied
+-- prueft beides auf einmal: dass es eine Ablehnung ist UND welche.
+CREATE OR REPLACE FUNCTION app._test_denied(p_result jsonb, p_message text)
+RETURNS boolean LANGUAGE sql AS $$
+  SELECT app.is_denial(p_result) AND p_result->>'message' = p_message;
+$$;
+
 
 -- =============================================================================
 -- POSITIVE TESTS (rpc_get_my_roles als Admin)
@@ -94,7 +102,8 @@ ON CONFLICT DO NOTHING;
 SELECT app._test_set_jwt('{"sub":"33333333-3333-3333-3333-333333333333","role":"authenticated","app_role":"coach","team_id":"11111111-1111-1111-1111-111111111111"}');
 SELECT lives_ok($$SELECT * FROM app.rpc_get_my_roles()$$, 'rpc_get_my_roles als Coach');
 SELECT lives_ok($$SELECT * FROM app.rpc_list_team_members()$$, 'rpc_list_team_members als Coach');
-SELECT lives_ok($$SELECT * FROM app.rpc_get_clearance('66666666-6666-6666-6666-666666666666')$$, 'rpc_get_clearance als Coach');
+SELECT ok(NOT app.is_denial(app.rpc_get_clearance('66666666-6666-6666-6666-666666666666')),
+  'rpc_get_clearance als Coach');
 
 -- =============================================================================
 -- POSITIVE TESTS (Physio)
@@ -103,11 +112,16 @@ SELECT lives_ok($$SELECT * FROM app.rpc_get_clearance('66666666-6666-6666-6666-6
 SELECT app._test_set_jwt('{"sub":"44444444-4444-4444-4444-444444444444","role":"authenticated","app_role":"physio","team_id":"11111111-1111-1111-1111-111111111111"}');
 SELECT lives_ok($$SELECT * FROM app.rpc_get_my_roles()$$, 'rpc_get_my_roles als Physio');
 SELECT lives_ok($$SELECT * FROM app.rpc_list_team_members()$$, 'rpc_list_team_members als Physio');
-SELECT lives_ok($$SELECT * FROM app.rpc_check_ins_medical('2026-09-01', '2026-09-30')$$, 'rpc_check_ins_medical als Physio');
-SELECT lives_ok($$SELECT * FROM app.rpc_readiness_full('66666666-6666-6666-6666-666666666666', '2026-09-01', '2026-09-30')$$, 'rpc_readiness_full als Physio');
-SELECT lives_ok($$SELECT * FROM app.rpc_get_clearance('66666666-6666-6666-6666-666666666666')$$, 'rpc_get_clearance als Physio');
-SELECT lives_ok($$SELECT * FROM app.rpc_propose_clearance('66666666-6666-6666-6666-666666666666', 'limited', 'nur individuell')$$, 'rpc_propose_clearance als Physio');
-SELECT lives_ok($$SELECT * FROM app.rpc_release_deviation('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'release')$$, 'rpc_release_deviation als Physio');
+SELECT ok(NOT app.is_denial(app.rpc_check_ins_medical('66666666-6666-6666-6666-666666666666', '2026-09-01', '2026-09-30')),
+  'rpc_check_ins_medical als Physio');
+SELECT ok(NOT app.is_denial(app.rpc_readiness_full('66666666-6666-6666-6666-666666666666', '2026-09-01', '2026-09-30')),
+  'rpc_readiness_full als Physio');
+SELECT ok(NOT app.is_denial(app.rpc_get_clearance('66666666-6666-6666-6666-666666666666')),
+  'rpc_get_clearance als Physio');
+SELECT ok(NOT app.is_denial(app.rpc_propose_clearance('66666666-6666-6666-6666-666666666666', 'limited', 'nur individuell')),
+  'rpc_propose_clearance als Physio');
+SELECT ok(NOT app.is_denial(app.rpc_release_deviation('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'release')),
+  'rpc_release_deviation als Physio');
 
 -- =============================================================================
 -- POSITIVE TESTS (Doctor)
@@ -116,10 +130,14 @@ SELECT lives_ok($$SELECT * FROM app.rpc_release_deviation('aaaaaaaa-aaaa-aaaa-aa
 SELECT app._test_set_jwt('{"sub":"55555555-5555-5555-5555-555555555555","role":"authenticated","app_role":"doctor","team_id":"11111111-1111-1111-1111-111111111111"}');
 SELECT lives_ok($$SELECT * FROM app.rpc_get_my_roles()$$, 'rpc_get_my_roles als Doctor');
 SELECT lives_ok($$SELECT * FROM app.rpc_list_team_members()$$, 'rpc_list_team_members als Doctor');
-SELECT lives_ok($$SELECT * FROM app.rpc_check_ins_medical('2026-09-01', '2026-09-30')$$, 'rpc_check_ins_medical als Doctor');
-SELECT lives_ok($$SELECT * FROM app.rpc_readiness_full('66666666-6666-6666-6666-666666666666', '2026-09-01', '2026-09-30')$$, 'rpc_readiness_full als Doctor');
-SELECT lives_ok($$SELECT * FROM app.rpc_set_clearance('66666666-6666-6666-6666-666666666666', 'full', 'voll belastbar', '2026-09-03', NULL)$$, 'rpc_set_clearance als Doctor');
-SELECT lives_ok($$SELECT * FROM app.rpc_release_deviation('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'dismiss')$$, 'rpc_release_deviation als Doctor');
+SELECT ok(NOT app.is_denial(app.rpc_check_ins_medical('66666666-6666-6666-6666-666666666666', '2026-09-01', '2026-09-30')),
+  'rpc_check_ins_medical als Doctor');
+SELECT ok(NOT app.is_denial(app.rpc_readiness_full('66666666-6666-6666-6666-666666666666', '2026-09-01', '2026-09-30')),
+  'rpc_readiness_full als Doctor');
+SELECT ok(NOT app.is_denial(app.rpc_set_clearance('66666666-6666-6666-6666-666666666666', 'full', 'voll belastbar', '2026-09-03', NULL)),
+  'rpc_set_clearance als Doctor');
+SELECT ok(NOT app.is_denial(app.rpc_release_deviation('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'dismiss')),
+  'rpc_release_deviation als Doctor');
 
 -- =============================================================================
 -- POSITIVE TESTS (Player)
@@ -127,9 +145,12 @@ SELECT lives_ok($$SELECT * FROM app.rpc_release_deviation('aaaaaaaa-aaaa-aaaa-aa
 
 SELECT app._test_set_jwt('{"sub":"66666666-6666-6666-6666-666666666666","role":"authenticated","app_role":"player","team_id":"11111111-1111-1111-1111-111111111111"}');
 SELECT lives_ok($$SELECT * FROM app.rpc_get_my_roles()$$, 'rpc_get_my_roles als Player');
-SELECT lives_ok($$SELECT * FROM app.rpc_check_ins_medical('2026-09-01', '2026-09-30')$$, 'rpc_check_ins_medical als Player');
-SELECT lives_ok($$SELECT * FROM app.rpc_readiness_full('66666666-6666-6666-6666-666666666666', '2026-09-01', '2026-09-30')$$, 'rpc_readiness_full als Player');
-SELECT lives_ok($$SELECT * FROM app.rpc_get_clearance('66666666-6666-6666-6666-666666666666')$$, 'rpc_get_clearance als Player');
+SELECT ok(NOT app.is_denial(app.rpc_check_ins_medical('66666666-6666-6666-6666-666666666666', '2026-09-01', '2026-09-30')),
+  'rpc_check_ins_medical als Player');
+SELECT ok(NOT app.is_denial(app.rpc_readiness_full('66666666-6666-6666-6666-666666666666', '2026-09-01', '2026-09-30')),
+  'rpc_readiness_full als Player');
+SELECT ok(NOT app.is_denial(app.rpc_get_clearance('66666666-6666-6666-6666-666666666666')),
+  'rpc_get_clearance als Player');
 SELECT lives_ok($$SELECT * FROM app.rpc_get_my_access_log('2026-09-01', '2026-09-30')$$, 'rpc_get_my_access_log als Player');
 SELECT lives_ok($$SELECT * FROM app.rpc_export_my_data()$$, 'rpc_export_my_data als Player');
 
@@ -140,19 +161,23 @@ SELECT lives_ok($$SELECT * FROM app.rpc_export_my_data()$$, 'rpc_export_my_data 
 
 -- Coach darf body_map nicht
 SELECT app._test_set_jwt('{"sub":"33333333-3333-3333-3333-333333333333","role":"authenticated","app_role":"coach","team_id":"11111111-1111-1111-1111-111111111111"}');
-SELECT throws_ok($$SELECT * FROM app.rpc_check_ins_medical('2026-09-01', '2026-09-30')$$, '42501', 'FORBIDDEN: daily_checkins.body_map', 'rpc_check_ins_medical blockt Coach');
+SELECT ok(app._test_denied(app.rpc_check_ins_medical('66666666-6666-6666-6666-666666666666', '2026-09-01', '2026-09-30'), 'FORBIDDEN: daily_checkins.body_map'),
+  'rpc_check_ins_medical blockt Coach');
 
 -- Coach darf readiness_full nicht
 SELECT app._test_set_jwt('{"sub":"33333333-3333-3333-3333-333333333333","role":"authenticated","app_role":"coach","team_id":"11111111-1111-1111-1111-111111111111"}');
-SELECT throws_ok($$SELECT * FROM app.rpc_readiness_full('66666666-6666-6666-6666-666666666666', '2026-09-01', '2026-09-30')$$, '42501', 'FORBIDDEN: readiness_scores.score_total', 'rpc_readiness_full blockt Coach');
+SELECT ok(app._test_denied(app.rpc_readiness_full('66666666-6666-6666-6666-666666666666', '2026-09-01', '2026-09-30'), 'FORBIDDEN: readiness_scores.score_total'),
+  'rpc_readiness_full blockt Coach');
 
 -- Coach darf Clearance nicht setzen
 SELECT app._test_set_jwt('{"sub":"33333333-3333-3333-3333-333333333333","role":"authenticated","app_role":"coach","team_id":"11111111-1111-1111-1111-111111111111"}');
-SELECT throws_ok($$SELECT * FROM app.rpc_set_clearance('66666666-6666-6666-6666-666666666666', 'full', NULL, '2026-09-03', NULL)$$, '42501', 'FORBIDDEN: medical_clearances.set (only doctor)', 'rpc_set_clearance blockt Coach');
+SELECT ok(app._test_denied(app.rpc_set_clearance('66666666-6666-6666-6666-666666666666', 'full', NULL, '2026-09-03', NULL), 'FORBIDDEN: medical_clearances.set (only doctor)'),
+  'rpc_set_clearance blockt Coach');
 
 -- Physio darf nicht setzen
 SELECT app._test_set_jwt('{"sub":"44444444-4444-4444-4444-444444444444","role":"authenticated","app_role":"physio","team_id":"11111111-1111-1111-1111-111111111111"}');
-SELECT throws_ok($$SELECT * FROM app.rpc_set_clearance('66666666-6666-6666-6666-666666666666', 'full', NULL, '2026-09-03', NULL)$$, '42501', 'FORBIDDEN: medical_clearances.set (only doctor)', 'rpc_set_clearance blockt Physio');
+SELECT ok(app._test_denied(app.rpc_set_clearance('66666666-6666-6666-6666-666666666666', 'full', NULL, '2026-09-03', NULL), 'FORBIDDEN: medical_clearances.set (only doctor)'),
+  'rpc_set_clearance blockt Physio');
 
 -- Player darf Liste nicht sehen
 SELECT app._test_set_jwt('{"sub":"66666666-6666-6666-6666-666666666666","role":"authenticated","app_role":"player","team_id":"11111111-1111-1111-1111-111111111111"}');
@@ -160,7 +185,8 @@ SELECT throws_ok($$SELECT * FROM app.rpc_list_team_members()$$, '42501', 'FORBID
 
 -- Player darf nicht freigeben
 SELECT app._test_set_jwt('{"sub":"66666666-6666-6666-6666-666666666666","role":"authenticated","app_role":"player","team_id":"11111111-1111-1111-1111-111111111111"}');
-SELECT throws_ok($$SELECT * FROM app.rpc_release_deviation('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'release')$$, '42501', 'FORBIDDEN: load_deviations.release', 'rpc_release_deviation blockt Player');
+SELECT ok(app._test_denied(app.rpc_release_deviation('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'release'), 'FORBIDDEN: load_deviations.release'),
+  'rpc_release_deviation blockt Player');
 
 -- Coach darf nicht shredden
 SELECT app._test_set_jwt('{"sub":"33333333-3333-3333-3333-333333333333","role":"authenticated","app_role":"coach","team_id":"11111111-1111-1111-1111-111111111111"}');
@@ -213,15 +239,13 @@ SELECT ok(
 
 SELECT app._test_set_jwt('{"sub":"22222222-2222-2222-2222-222222222222","role":"authenticated","app_role":"admin","team_id":"11111111-1111-1111-1111-111111111111"}');
 
-SELECT lives_ok(
-  $$SELECT * FROM app.rpc_get_clearance('66666666-6666-6666-6666-666666666666')$$,
+SELECT ok(NOT app.is_denial(app.rpc_get_clearance('66666666-6666-6666-6666-666666666666')),
   'ADR-018: rpc_get_clearance laeuft fuer admin');
 CREATE TEMP TABLE _adr018_admin AS
-  SELECT status::text AS st, load_note AS note
-    FROM app.rpc_get_clearance('66666666-6666-6666-6666-666666666666');
+  SELECT app.rpc_get_clearance('66666666-6666-6666-6666-666666666666')->'clearance' AS c;
 
-SELECT isnt((SELECT st   FROM _adr018_admin), NULL, 'ADR-018: admin sieht den Status der Freigabe');
-SELECT isnt((SELECT note FROM _adr018_admin), NULL, 'ADR-018: admin sieht auch den Freitext load_note, nicht nur die Einstufung');
+SELECT isnt((SELECT c->>'status'    FROM _adr018_admin), NULL, 'ADR-018: admin sieht den Status der Freigabe');
+SELECT isnt((SELECT c->>'load_note' FROM _adr018_admin), NULL, 'ADR-018: admin sieht auch den Freitext load_note, nicht nur die Einstufung');
 
 -- Die eigentliche Aussage von ADR-018, Umfang "Status UND Freitext": admin bekommt
 -- dasselbe zu sehen wie die Medizin, nichts ist geschwaerzt. Der Vergleich ist
@@ -229,24 +253,19 @@ SELECT isnt((SELECT note FROM _adr018_admin), NULL, 'ADR-018: admin sieht auch d
 -- ist -- ein fester Erwartungswert waere hier an fruehere Tests gekoppelt.
 SELECT app._test_set_jwt('{"sub":"55555555-5555-5555-5555-555555555555","role":"authenticated","app_role":"doctor","team_id":"11111111-1111-1111-1111-111111111111"}');
 CREATE TEMP TABLE _adr018_doctor AS
-  SELECT status::text AS st, load_note AS note
-    FROM app.rpc_get_clearance('66666666-6666-6666-6666-666666666666');
+  SELECT app.rpc_get_clearance('66666666-6666-6666-6666-666666666666')->'clearance' AS c;
 
-SELECT is((SELECT st   FROM _adr018_admin), (SELECT st   FROM _adr018_doctor),
+SELECT is((SELECT c->>'status'    FROM _adr018_admin), (SELECT c->>'status'    FROM _adr018_doctor),
   'ADR-018: admin sieht denselben Status wie die Aerztin');
-SELECT is((SELECT note FROM _adr018_admin), (SELECT note FROM _adr018_doctor),
+SELECT is((SELECT c->>'load_note' FROM _adr018_admin), (SELECT c->>'load_note' FROM _adr018_doctor),
   'ADR-018: admin sieht denselben Freitext wie die Aerztin, nichts geschwaerzt');
 
 SELECT app._test_set_jwt('{"sub":"22222222-2222-2222-2222-222222222222","role":"authenticated","app_role":"admin","team_id":"11111111-1111-1111-1111-111111111111"}');
 
 -- Die Grenze der Entscheidung: lesen ja, setzen nein.
-SELECT throws_ok(
-  $$SELECT * FROM app.rpc_set_clearance('66666666-6666-6666-6666-666666666666', 'full', NULL, '2026-09-03', NULL)$$,
-  '42501', 'FORBIDDEN: medical_clearances.set (only doctor)',
+SELECT ok(app._test_denied(app.rpc_set_clearance('66666666-6666-6666-6666-666666666666', 'full', NULL, '2026-09-03', NULL), 'FORBIDDEN: medical_clearances.set (only doctor)'),
   'ADR-018 aendert nur die Lesezeile: admin darf die Freigabe weiterhin NICHT setzen');
-SELECT throws_ok(
-  $$SELECT * FROM app.rpc_propose_clearance('66666666-6666-6666-6666-666666666666', 'full', NULL)$$,
-  '42501', 'FORBIDDEN: medical_clearances.propose (only physio)',
+SELECT ok(app._test_denied(app.rpc_propose_clearance('66666666-6666-6666-6666-666666666666', 'full', NULL), 'FORBIDDEN: medical_clearances.propose (only physio)'),
   'ADR-018 aendert nur die Lesezeile: admin darf die Freigabe auch nicht vorschlagen');
 
 -- Der COMMENT ist die einzige Stelle, an der die Begruendung im Code steht.
@@ -313,54 +332,45 @@ SELECT ok(NOT has_function_privilege('anon', 'app.auth_target_is_team_player(uui
 -- --- N3: Protokollzeile ueber eine teamfremde Person ---------------------------
 
 SELECT app._test_set_jwt('{"sub":"33333333-3333-3333-3333-333333333333","role":"authenticated","app_role":"coach","team_id":"11111111-1111-1111-1111-111111111111"}');
-SELECT throws_ok(
-  $$SELECT * FROM app.rpc_get_clearance('b2222222-2222-2222-2222-222222222222')$$,
-  '42501', 'FORBIDDEN: medical_clearances.get',
+SELECT ok(app._test_denied(app.rpc_get_clearance('b2222222-2222-2222-2222-222222222222'), 'FORBIDDEN: medical_clearances.get'),
   'Punkt 52 (N3): rpc_get_clearance blockt eine teamfremde Person');
-SELECT lives_ok(
-  $$SELECT * FROM app.rpc_get_clearance('66666666-6666-6666-6666-666666666666')$$,
+SELECT ok(NOT app.is_denial(app.rpc_get_clearance('66666666-6666-6666-6666-666666666666')),
   'Positivkontrolle: rpc_get_clearance laeuft fuer die eigene Spielerin unveraendert');
 
 SELECT app._test_set_jwt('{"sub":"44444444-4444-4444-4444-444444444444","role":"authenticated","app_role":"physio","team_id":"11111111-1111-1111-1111-111111111111"}');
-SELECT throws_ok(
-  $$SELECT * FROM app.rpc_readiness_full('b2222222-2222-2222-2222-222222222222', '2026-09-01', '2026-09-30')$$,
-  '42501', 'FORBIDDEN: readiness_scores.full',
+SELECT ok(app._test_denied(app.rpc_readiness_full('b2222222-2222-2222-2222-222222222222', '2026-09-01', '2026-09-30'), 'FORBIDDEN: readiness_scores.full'),
   'Punkt 52 (N3): rpc_readiness_full blockt eine teamfremde Person');
-SELECT lives_ok(
-  $$SELECT * FROM app.rpc_readiness_full('66666666-6666-6666-6666-666666666666', '2026-09-01', '2026-09-30')$$,
+SELECT ok(NOT app.is_denial(app.rpc_readiness_full('66666666-6666-6666-6666-666666666666', '2026-09-01', '2026-09-30')),
   'Positivkontrolle: rpc_readiness_full laeuft fuer die eigene Spielerin unveraendert');
 
 
 -- --- N4: Freigabe fuer eine teamfremde Person ---------------------------------
 
 SELECT app._test_set_jwt('{"sub":"55555555-5555-5555-5555-555555555555","role":"authenticated","app_role":"doctor","team_id":"11111111-1111-1111-1111-111111111111"}');
-SELECT throws_ok(
-  $$SELECT * FROM app.rpc_set_clearance('b2222222-2222-2222-2222-222222222222', 'blocked', 'quer', '2026-09-03', NULL)$$,
-  '42501', 'FORBIDDEN: medical_clearances.set',
+SELECT ok(app._test_denied(app.rpc_set_clearance('b2222222-2222-2222-2222-222222222222', 'blocked', 'quer', '2026-09-03', NULL), 'FORBIDDEN: medical_clearances.set'),
   'Punkt 52 (N4): rpc_set_clearance blockt eine teamfremde Person');
-SELECT lives_ok(
-  $$SELECT * FROM app.rpc_set_clearance('66666666-6666-6666-6666-666666666666', 'full', 'eigen', '2026-09-03', NULL)$$,
+SELECT ok(NOT app.is_denial(app.rpc_set_clearance('66666666-6666-6666-6666-666666666666', 'full', 'eigen', '2026-09-03', NULL)),
   'Positivkontrolle: rpc_set_clearance laeuft fuer die eigene Spielerin unveraendert');
 
 
 -- --- Punkt 56: dieselbe Luecke in rpc_propose_clearance, und die Protokollzeile
 
 SELECT app._test_set_jwt('{"sub":"44444444-4444-4444-4444-444444444444","role":"authenticated","app_role":"physio","team_id":"11111111-1111-1111-1111-111111111111"}');
-SELECT throws_ok(
-  $$SELECT * FROM app.rpc_propose_clearance('b2222222-2222-2222-2222-222222222222', 'individual', 'quer')$$,
-  '42501', 'FORBIDDEN: medical_clearances.propose',
+SELECT ok(app._test_denied(app.rpc_propose_clearance('b2222222-2222-2222-2222-222222222222', 'individual', 'quer'), 'FORBIDDEN: medical_clearances.propose'),
   'Punkt 56: rpc_propose_clearance blockt eine teamfremde Person');
 
 CREATE TEMP TABLE _n8_vorher AS
   SELECT (SELECT count(*) FROM app.access_log)         AS log,
-         (SELECT count(*) FROM app.medical_clearances) AS clr;
+         (SELECT count(*) FROM app.medical_clearances)  AS clr,
+         (SELECT count(*) FROM app.clearance_proposals) AS prop;
 
-SELECT lives_ok(
-  $$SELECT * FROM app.rpc_propose_clearance('66666666-6666-6666-6666-666666666666', 'individual', 'Vorschlag Physio')$$,
+SELECT ok(NOT app.is_denial(app.rpc_propose_clearance('66666666-6666-6666-6666-666666666666', 'individual', 'Vorschlag Physio')),
   'Positivkontrolle: rpc_propose_clearance laeuft fuer die eigene Spielerin unveraendert');
 
-SELECT is((SELECT count(*) FROM app.medical_clearances) - (SELECT clr FROM _n8_vorher), 1::bigint,
-  'rpc_propose_clearance schreibt weiterhin genau eine Zeile in medical_clearances');
+SELECT is((SELECT count(*) FROM app.clearance_proposals) - (SELECT prop FROM _n8_vorher), 1::bigint,
+  'AP-47a: rpc_propose_clearance schreibt genau eine Zeile in clearance_proposals');
+SELECT is((SELECT count(*) FROM app.medical_clearances) - (SELECT clr FROM _n8_vorher), 0::bigint,
+  'AP-47a: und KEINE in medical_clearances -- ein Vorschlag ist keine Freigabe (ADR-017 4.2)');
 SELECT is((SELECT count(*) FROM app.access_log) - (SELECT log FROM _n8_vorher), 1::bigint,
   'Punkt 56 (N8): rpc_propose_clearance schreibt jetzt genau eine Zeile in access_log');
 SELECT is((SELECT action FROM app.access_log ORDER BY id DESC LIMIT 1), 'write',
