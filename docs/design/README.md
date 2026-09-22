@@ -31,6 +31,24 @@ Grund gibt es keine zulässige Kombination, stattdessen Outline mit `stop-ink`.
 - **Spacing:** `4 / 8 / 12 / 16 / 24 / 32 / 48 / 64 / 96`, keine Freihandwerte
 - **Radius:** `0 / 4 / 8` (vorher `8 / 12 / 20`, der Anker ist kantig)
 
+## Tokens für Datenvisualisierung
+
+Ergänzt 2026-09-22 (AP-54-Nachtrag, Punkt 49). Die sieben Tokens oben sind UI-Chrome
+(Fläche, Marke, Text). Skalen wie Body-Map-Schweregrad, Faktor-Balken oder eine
+vierstufige Score-Note brauchen mehr als eine Aufmerksamkeitsfarbe und sind keine
+Primäraktion — dafür diese drei, bewusst fern von `signal`:
+
+| Rolle | Wert | Verwendung |
+|---|---|---|
+| `clear` | `#3DD68C` | gut / niedrig (stand schon ungenutzt im Mockup) |
+| `notice` | `#8BC34A` | nahe an gut, vierte Stufe (z. B. Score-Note) |
+| `caution` | `#F2711C` | mittel |
+
+Ampel-Logik über bis zu vier Stufen: `stop` → `caution` → `notice` → `clear`.
+`clear` ist von Chris entschieden (Ersatz für das v0.5-Grün beim Erfolgszustand:
+Sync, Gate, Check-in). `caution` und `notice` sind an Claude delegiert, bewusst
+gewählt für klaren Farbabstand zu `signal` und zueinander.
+
 ## Signature-Element: Kaderleiste
 
 Eine waagerechte Linie ist der eigene Schnitt der Spielerin. Jede Spielerin ist ein Plättchen
@@ -41,6 +59,6 @@ Ersetzt den Readiness-Puls aus v0.2.
 
 ## Offen
 
-- Die Player App führt zwei Token-Systeme (`colors` dunkel, `tokens` hell). Die helle Seite hat mit v1.0 keinen Anker mehr.
-- Radius `0/4/8` betrifft alle bestehenden Komponenten.
+- ~~Die Player App führt zwei Token-Systeme~~ ✅ AP-54: ein Token-System, das helle Objekt ist weg.
+- ~~Radius `0/4/8` betrifft alle bestehenden Komponenten~~ ✅ AP-54, Teil derselben Umstellung.
 - Die Check-In Skala ist eine durchgehende Leiste, kein Raster aus zehn Feldern: zehn Felder erreichen auf 390 Punkt Breite das 44-Punkt-Touchziel nicht.
