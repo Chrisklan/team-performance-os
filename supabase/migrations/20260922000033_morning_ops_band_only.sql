@@ -1,30 +1,44 @@
 -- =============================================================================
--- 08_dashboard_migration.sql — rpc_morning_ops()
--- Liefert den Coach-Kader-Payload (CoachKaderPayload-Form) fuer das
--- Trainer-Dashboard aus app.persons, app.readiness_scores,
--- app.daily_checkins und app.medical_clearances.
--- Stand: Migration 20260922000033 (AP-55, Befund N7 der Opus-Gegenlesung).
--- Davor 20260918000015 (AP-27/AP-32 Angleichung 2026-09-19), davor las die
--- Funktion public.*, das ist ersetzt.
--- ADR-001 Silo: Scoping ausschliesslich ueber app.auth_team_id().
--- ADR-009 Rollen-Matrix: nur Staff (coach/athletic_coach) darf lesen.
+-- 20260922000033_morning_ops_band_only.sql
+-- app.rpc_morning_ops() liefert dem Trainerteam nur noch readiness.band.
+-- Befund N7 der Opus-Gegenlesung (AP-45, 2026-09-22), Bridge Punkt 50.
 --
--- Medizin-Gate (Modul-Rollen-Medizin-Gate Abschnitt 5, fett markierte Striche):
--- Staff bekommt Zustandsklassen, nie Zahlwerte oder Verlaeufe. Der Payload
--- traegt deshalb NUR readiness.band (low/moderate/high). score_total und
--- factors standen bis zum 2026-09-22 darin und waren damit fuer coach und
--- athletic_coach live erreichbar, obwohl die Spaltenrechte von authenticated
--- auf app.readiness_scores beide Spalten sperren (band, computed_at,
--- created_at, date, id, person_id, team_id) - die SECURITY DEFINER Funktion
--- ging an diesem Schutz vorbei. Der Lesepfad fuer Medizin und self ist und
--- bleibt app.rpc_readiness_full, der beide Felder vollstaendig liefert.
--- Wer hier wieder ein Zahlfeld einbaut, hebt das Medizin-Gate auf und
--- braucht nach der harten Regel des Moduls ein neues ADR.
--- Idempotent: DROP IF EXISTS vor CREATE.
--- Voraussetzung: 08_reconciling.sql und 09_rpcs.sql (Tabellen, Helper).
+-- Was der Befund sagt (Beleg Audits/2026-09-21-ap45-bodymap-verlauf 11.5):
+-- app.rpc_morning_ops() baute 'readiness' aus rs.score_total, rs.band und
+-- rs.factors. Ihr Waechter ist "IF NOT app.auth_is_staff()", also genau
+-- coach und athletic_coach. Die kanonische Rollen-Zugriffsmatrix
+-- (Module/Modul-Rollen-Medizin-Gate Abschnitt 5) setzt fuer beide Rollen in
+-- den Zeilen readiness_scores.score_total und readiness_scores.factors ein
+-- fett markiertes "-". Die Funktion ist SECURITY DEFINER und ging damit an
+-- den Spaltenrechten vorbei, die denselben Schutz auf der Tabelle leisten:
+--   authenticated auf app.readiness_scores =
+--     band, computed_at, created_at, date, id, person_id, team_id
+--   (score_total und factors fehlen dort absichtlich)
+-- Gemessen am 2026-09-22: dieselbe Trainerin bekommt direkt
+--   "permission denied for table readiness_scores",
+-- durch die Tuer public.rpc_trainer_morning_ops dagegen
+--   {"band":"high","value":83.0,"factors":{...,"soreness":0.4}}.
+-- Das ist der einzige RPC, den der Web Client taeglich ruft
+-- (lib/trainer/api.ts:45), der Befund war also live erreichbar.
+--
+-- Was diese Migration aendert: genau zwei Schluessel im Payload.
+--   vorher: 'readiness' = {"value": rs.score_total, "band": rs.band,
+--                          "factors": rs.factors}
+--   nachher: 'readiness' = {"band": rs.band}
+-- Die Schluessel werden entfernt, nicht auf null gesetzt: ein null-Feld
+-- laedt dazu ein, es spaeter wieder zu fuellen.
+--
+-- Was diese Migration NICHT aendert:
+-- * Waechter, Silo, Zeilenmenge, Reihenfolge, alle uebrigen Felder des
+--   Payloads (player, baseline, medicalStatus, medicalClearance,
+--   attendance, todayEvent, hasCheckIn) bleiben Zeichen fuer Zeichen gleich.
+-- * Der Lesepfad fuer Medizin und self bleibt app.rpc_readiness_full
+--   (physio, doctor, eigene Person), der beide Felder vollstaendig liefert.
+-- * Keine Rechte, keine Policy, keine Tabelle, keine Datenzeile.
+--
+-- Kein DROP: gleiche Signatur, gleicher Rueckgabetyp, CREATE OR REPLACE
+-- genuegt und laesst die Rechte der Funktion unangetastet.
 -- =============================================================================
-
-DROP FUNCTION IF EXISTS app.rpc_morning_ops();
 
 CREATE OR REPLACE FUNCTION app.rpc_morning_ops()
 RETURNS jsonb
@@ -103,14 +117,5 @@ BEGIN
 END;
 $$;
 
--- Rechte wie in der Cloud gemessen (2026-09-22):
---   authenticated=EXECUTE, postgres=EXECUTE, service_role=EXECUTE, kein PUBLIC.
--- anon steht hier bis zum 2026-09-22 im GRANT und war damit ein Ruecklaeufer:
--- Migration 20260921000024 (AP-39b) hat anon jedes EXECUTE in app entzogen,
--- ein Neuaufbau der Test DB nach der dokumentierten Reihenfolge gab es hier
--- aber sofort zurueck. Gefunden hat das Suite 15 (anon kann keine Funktion in
--- app mehr ausfuehren, have 1 want 0), nachdem diese Datei neu eingespielt
--- wurde. Die Cloud war nie betroffen, dort laeuft nur die Migration.
-REVOKE EXECUTE ON FUNCTION app.rpc_morning_ops() FROM PUBLIC;
-REVOKE EXECUTE ON FUNCTION app.rpc_morning_ops() FROM anon;
-GRANT EXECUTE ON FUNCTION app.rpc_morning_ops() TO authenticated, service_role;
+COMMENT ON FUNCTION app.rpc_morning_ops() IS
+  'Trainer-Kader-Payload. Medizin-Gate: nur readiness.band, nie score_total oder factors (Befund N7, 2026-09-22).';
