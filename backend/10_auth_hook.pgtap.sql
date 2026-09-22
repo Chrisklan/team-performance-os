@@ -12,6 +12,17 @@ BEGIN;
 SET search_path = public, pgtap;
 SELECT plan(38);
 
+
+-- ---------------------------------------------------------------------------
+-- Punkt 55 (2026-09-22): app.rpc_shred_person(uuid) hat seit backend/26_app_execute_revoke.sql
+-- kein EXECUTE mehr fuer authenticated (Befund N5). Diese Suite prueft ihren Rumpf,
+-- nicht ihr Recht, und ruft sie unter SET ROLE authenticated auf. Sie leiht sich das
+-- Recht deshalb fuer die Dauer dieser Transaktion zurueck, der ROLLBACK am Ende nimmt
+-- es wieder. Dass das Recht im Normalbetrieb fehlt, prueft Suite 26.
+-- ---------------------------------------------------------------------------
+GRANT EXECUTE ON FUNCTION app.rpc_shred_person(uuid) TO authenticated;
+GRANT EXECUTE ON FUNCTION app.rpc_list_team_members()    TO authenticated;
+
 -- =============================================================================
 -- SETUP (als Superuser)
 -- Rollen-Zuordnungen beginnen gestern, damit ein Entzug per valid_to = now()

@@ -25,6 +25,16 @@ BEGIN;
 SET search_path = public, pgtap;
 SELECT plan(36);
 
+
+-- ---------------------------------------------------------------------------
+-- Punkt 55 (2026-09-22): app.rpc_readiness_full(uuid, date, date) hat seit backend/26_app_execute_revoke.sql
+-- kein EXECUTE mehr fuer authenticated (Befund N5). Diese Suite prueft ihren Rumpf,
+-- nicht ihr Recht, und ruft sie unter SET ROLE authenticated auf. Sie leiht sich das
+-- Recht deshalb fuer die Dauer dieser Transaktion zurueck, der ROLLBACK am Ende nimmt
+-- es wieder. Dass das Recht im Normalbetrieb fehlt, prueft Suite 26.
+-- ---------------------------------------------------------------------------
+GRANT EXECUTE ON FUNCTION app.rpc_readiness_full(uuid, date, date) TO authenticated;
+
 INSERT INTO app.teams (id, name, timezone) VALUES
   ('22222222-2222-2222-2222-222222222222', 'Band Team', 'Europe/Berlin');
 

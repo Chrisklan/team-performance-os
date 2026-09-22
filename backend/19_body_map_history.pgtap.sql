@@ -17,6 +17,16 @@ BEGIN;
 SET search_path = public, pgtap;
 SELECT plan(75);
 
+
+-- ---------------------------------------------------------------------------
+-- Punkt 55 (2026-09-22): app.rpc_shred_person(uuid) hat seit backend/26_app_execute_revoke.sql
+-- kein EXECUTE mehr fuer authenticated (Befund N5). Diese Suite prueft ihren Rumpf,
+-- nicht ihr Recht, und ruft sie unter SET ROLE authenticated auf. Sie leiht sich das
+-- Recht deshalb fuer die Dauer dieser Transaktion zurueck, der ROLLBACK am Ende nimmt
+-- es wieder. Dass das Recht im Normalbetrieb fehlt, prueft Suite 26.
+-- ---------------------------------------------------------------------------
+GRANT EXECUTE ON FUNCTION app.rpc_shred_person(uuid) TO authenticated;
+
 INSERT INTO app.teams (id, name, timezone, squad_type) VALUES
   ('19191919-1919-1919-1919-191919191919', 'Verlauf Kader',  'Europe/Berlin', 'frauen'),
   ('19191919-1919-1919-1919-191919190000', 'Anderer Kader',  'Europe/Berlin', 'frauen');

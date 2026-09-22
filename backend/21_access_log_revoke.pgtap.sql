@@ -16,6 +16,16 @@ BEGIN;
 SET search_path = public, pgtap;
 SELECT plan(13);
 
+
+-- ---------------------------------------------------------------------------
+-- Punkt 55 (2026-09-22): app.rpc_get_clearance(uuid) hat seit backend/26_app_execute_revoke.sql
+-- kein EXECUTE mehr fuer authenticated (Befund N5). Diese Suite prueft ihren Rumpf,
+-- nicht ihr Recht, und ruft sie unter SET ROLE authenticated auf. Sie leiht sich das
+-- Recht deshalb fuer die Dauer dieser Transaktion zurueck, der ROLLBACK am Ende nimmt
+-- es wieder. Dass das Recht im Normalbetrieb fehlt, prueft Suite 26.
+-- ---------------------------------------------------------------------------
+GRANT EXECUTE ON FUNCTION app.rpc_get_clearance(uuid) TO authenticated;
+
 INSERT INTO app.teams (id, name, timezone) VALUES
   ('21212121-2121-2121-2121-212121212121', 'Entzug Kader', 'Europe/Berlin');
 

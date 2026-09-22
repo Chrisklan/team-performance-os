@@ -61,8 +61,13 @@ SELECT is(has_function_privilege('authenticated', 'public.rpc_submit_checkin(dat
 SELECT is(has_function_privilege('authenticated', 'public.rpc_trainer_morning_ops()', 'EXECUTE'), true,
   'die Tuer public.rpc_trainer_morning_ops ist fuer authenticated offen');
 
-SELECT is(has_function_privilege('authenticated', 'app.rpc_shred_person(uuid)', 'EXECUTE'), true,
-  'authenticated darf weiter app.rpc_shred_person aufrufen (die Rollenpruefung sitzt in der Funktion)');
+-- Punkt 55 (2026-09-22, Befund N5): diese Aussage galt bis backend/26_app_execute_revoke.sql
+-- und ist seither umgedreht. rpc_shred_person hat keine Tuer in public und keinen Aufrufer,
+-- ihr EXECUTE fuer authenticated ist entzogen. Die Rollenpruefung sitzt weiter in der
+-- Funktion, sie ist jetzt nur nicht mehr die einzige Huerde. Welche acht das betrifft und
+-- welche sechs ihr Recht behalten, prueft Suite 26.
+SELECT is(has_function_privilege('authenticated', 'app.rpc_shred_person(uuid)', 'EXECUTE'), false,
+  'authenticated darf app.rpc_shred_person nicht mehr aufrufen (Punkt 55)');
 
 -- Die drei Funktionen, deren EXECUTE vor der Migration nur ueber PUBLIC kam.
 -- Sie sind der Grund fuer Schritt 0 der Migration.
