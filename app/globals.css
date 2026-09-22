@@ -18,10 +18,13 @@
   --stop: #e23d3d;
   --stop-ink: #ff8a8a;
 
-  /* Ohne v1.0-Anker (Body-Map-artige Schweregrade), needs_decision an Chris,
-     siehe AP-54 Rueckmeldung. Werte aus v0.5 unveraendert uebernommen. */
-  --legacy-accent: #3e8eff;
-  --legacy-ok: #3fb87a;
+  /* Ergaenzt 2026-09-22 (AP-54-Nachtrag, von Chris entschieden): Datenskalen
+     (Score-Note, Readiness-Puls, Erfolgszustand) brauchen mehr als eine
+     Aufmerksamkeitsfarbe. clear stand schon ungenutzt im Mockup, caution und
+     notice sind neu. Ampel ueber vier Stufen: stop -> caution -> notice -> clear. */
+  --clear: #3dd68c;
+  --caution: #f2711c;
+  --notice: #8bc34a;
 }
 
 html,

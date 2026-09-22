@@ -20,12 +20,11 @@ const MEDICAL_ICON: Record<MedicalStatus, string> = {
   red: "🔴",
 };
 
-// needs_decision an Chris (AP-54): niedrig/mittel/hoch ohne v1.0-Anker, mittel kollidiert
-// mit signal (jetzt Gelb). Werte aus v0.5 unveraendert uebernommen, siehe AP-54 Rueckmeldung.
+// v1.0 Ampel-Logik (AP-54-Nachtrag, von Chris entschieden): stop -> caution -> clear.
 function factorBarColor(value: number): string {
   if (value < 50) return "bg-stop";
-  if (value < 70) return "bg-[#3E8EFF]";
-  return "bg-[#3FB87A]";
+  if (value < 70) return "bg-caution";
+  return "bg-clear";
 }
 
 type PlayerCardProps = {

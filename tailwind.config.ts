@@ -18,6 +18,14 @@ const config: Config = {
         muted: "#9DB6CE",
         stop: "#E23D3D",
         "stop-ink": "#FF8A8A",
+        // Ergaenzt 2026-09-22 (AP-54-Nachtrag, von Chris entschieden): Datenskalen
+        // (Faktor-Balken, Score-Note, Readiness-Puls, Erfolgszustand) brauchen mehr
+        // als eine Aufmerksamkeitsfarbe. clear stand schon ungenutzt im Mockup,
+        // caution und notice sind neu. Ampel ueber vier Stufen: stop -> caution ->
+        // notice -> clear, alle bewusst fern von signal (Gelb).
+        clear: "#3DD68C",
+        caution: "#F2711C",
+        notice: "#8BC34A",
       },
       fontFamily: {
         sans: ["Roboto", "system-ui", "-apple-system", "Segoe UI", "sans-serif"],
