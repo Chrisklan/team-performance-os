@@ -198,6 +198,65 @@ SELECT ok(
 
 
 -- =============================================================================
+-- PUNKT 53 / ADR-018: admin liest die Freigabe, Status UND Freitext
+-- =============================================================================
+--
+-- Befund N2 der Gegenlesung war: der Waechter laesst admin durch, die Matrix sagte
+-- '-'. Chris hat am 2026-09-22 die Matrix geaendert statt den Code und es begruendet
+-- (ADR-018: Kaderplanung, Verbandsmeldung, Vertretung ohne Arzt). Diese Tests halten
+-- die Entscheidung fest. Wer sie kippen sieht, hat entweder ADR-018 zurueckgenommen
+-- oder versehentlich den admin Zweig entfernt.
+--
+-- GRENZE, die zur Entscheidung gehoert: entschieden ist die Rolle `admin`, wie sie
+-- heute existiert. Eine spaeter eingefuehrte, eingeschraenkte Verwaltungsrolle erbt
+-- das Recht NICHT und braucht eine eigene Entscheidung.
+
+SELECT app._test_set_jwt('{"sub":"22222222-2222-2222-2222-222222222222","role":"authenticated","app_role":"admin","team_id":"11111111-1111-1111-1111-111111111111"}');
+
+SELECT lives_ok(
+  $$SELECT * FROM app.rpc_get_clearance('66666666-6666-6666-6666-666666666666')$$,
+  'ADR-018: rpc_get_clearance laeuft fuer admin');
+CREATE TEMP TABLE _adr018_admin AS
+  SELECT status::text AS st, load_note AS note
+    FROM app.rpc_get_clearance('66666666-6666-6666-6666-666666666666');
+
+SELECT isnt((SELECT st   FROM _adr018_admin), NULL, 'ADR-018: admin sieht den Status der Freigabe');
+SELECT isnt((SELECT note FROM _adr018_admin), NULL, 'ADR-018: admin sieht auch den Freitext load_note, nicht nur die Einstufung');
+
+-- Die eigentliche Aussage von ADR-018, Umfang "Status UND Freitext": admin bekommt
+-- dasselbe zu sehen wie die Medizin, nichts ist geschwaerzt. Der Vergleich ist
+-- unabhaengig davon, welche Freigabe an dieser Stelle der Suite gerade die juengste
+-- ist -- ein fester Erwartungswert waere hier an fruehere Tests gekoppelt.
+SELECT app._test_set_jwt('{"sub":"55555555-5555-5555-5555-555555555555","role":"authenticated","app_role":"doctor","team_id":"11111111-1111-1111-1111-111111111111"}');
+CREATE TEMP TABLE _adr018_doctor AS
+  SELECT status::text AS st, load_note AS note
+    FROM app.rpc_get_clearance('66666666-6666-6666-6666-666666666666');
+
+SELECT is((SELECT st   FROM _adr018_admin), (SELECT st   FROM _adr018_doctor),
+  'ADR-018: admin sieht denselben Status wie die Aerztin');
+SELECT is((SELECT note FROM _adr018_admin), (SELECT note FROM _adr018_doctor),
+  'ADR-018: admin sieht denselben Freitext wie die Aerztin, nichts geschwaerzt');
+
+SELECT app._test_set_jwt('{"sub":"22222222-2222-2222-2222-222222222222","role":"authenticated","app_role":"admin","team_id":"11111111-1111-1111-1111-111111111111"}');
+
+-- Die Grenze der Entscheidung: lesen ja, setzen nein.
+SELECT throws_ok(
+  $$SELECT * FROM app.rpc_set_clearance('66666666-6666-6666-6666-666666666666', 'full', NULL, '2026-09-03', NULL)$$,
+  '42501', 'FORBIDDEN: medical_clearances.set (only doctor)',
+  'ADR-018 aendert nur die Lesezeile: admin darf die Freigabe weiterhin NICHT setzen');
+SELECT throws_ok(
+  $$SELECT * FROM app.rpc_propose_clearance('66666666-6666-6666-6666-666666666666', 'full', NULL)$$,
+  '42501', 'FORBIDDEN: medical_clearances.propose (only physio)',
+  'ADR-018 aendert nur die Lesezeile: admin darf die Freigabe auch nicht vorschlagen');
+
+-- Der COMMENT ist die einzige Stelle, an der die Begruendung im Code steht.
+-- Lessons Learned AP-56: ein pauschales Ueberschreiben nimmt sie weg.
+SELECT ok(
+  obj_description('app.rpc_get_clearance(uuid)'::regprocedure, 'pg_proc') LIKE '%ADR-018%',
+  'ADR-018: der COMMENT der Funktion nennt das ADR, der admin Zweig ist als begruendet markiert');
+
+
+-- =============================================================================
 -- PUNKT 52 UND 56 (Befunde N3, N4, N8): Teampruefung vor den Schreibstellen
 -- =============================================================================
 --
