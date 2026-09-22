@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<title>TPOS Mockups</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Roboto+Condensed:wght@700&family=Roboto:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --field:#04284C;
+  --panel:#063E75;
+  --signal:#FFD800;
+  --ink:#EAF1F8;
+  --muted:#9DB6CE;
+  --stop:#E23D3D;
+  --stop-ink:#FF8A8A;
+  --clear:#3DD68C;
+  --line:rgba(157,182,206,.16);
+
+  --s4:4px; --s8:8px; --s12:12px; --s16:16px; --s24:24px;
+  --s32:32px; --s48:48px; --s64:64px; --s96:96px;
+
+  --r0:0px; --r4:4px; --r8:8px;
+
+  --display:"Roboto Condensed",system-ui,sans-serif;
+  --text:"Roboto",system-ui,sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0A0E14;font-family:var(--text);padding:var(--s48) var(--s32);display:flex;flex-direction:column;gap:var(--s64);align-items:center}
+
+.caption{font-family:var(--display);font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:#5A6B7D;margin-bottom:var(--s12)}
+
+.screen{position:relative;overflow:hidden;background:var(--field);color:var(--ink)}
+.desk{width:1280px;min-height:800px}
+.phone{width:390px;height:844px;border-radius:var(--r8)}
+
+.pitch{position:absolute;inset:0;pointer-events:none}
+
+/* ---------- Kopfzeile ---------- */
+.top{position:relative;display:flex;align-items:center;justify-content:space-between;
+  padding:var(--s16) var(--s32);background:var(--panel);border-bottom:2px solid var(--signal)}
+.brand{display:flex;align-items:center;gap:var(--s12)}
+.crest{width:32px;height:38px;background:var(--signal);
+  clip-path:polygon(0 0,100% 0,100% 72%,50% 100%,0 72%);
+  display:flex;align-items:center;justify-content:center;
+  font-family:var(--display);font-size:12px;color:var(--field);letter-spacing:.04em;padding-bottom:var(--s4)}
+.brand b{font-family:var(--display);font-size:16px;letter-spacing:.04em;text-transform:uppercase;font-weight:700}
+.brand span{font-size:12px;color:var(--muted);display:block;letter-spacing:.02em}
+.nav{display:flex;gap:var(--s24);font-family:var(--display);font-size:14px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.nav .on{color:var(--ink);box-shadow:0 10px 0 -8px var(--signal)}
+.clock{font-family:var(--display);font-size:14px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+
+/* ---------- dominante Aussage ---------- */
+.lede{position:relative;padding:var(--s48) var(--s32) var(--s32);display:flex;gap:var(--s32);align-items:flex-start}
+.lede .num{font-family:var(--display);font-size:72px;line-height:.85;letter-spacing:-.02em;color:var(--signal)}
+.lede h1{font-family:var(--display);font-size:32px;line-height:1.1;letter-spacing:-.01em;text-transform:uppercase;font-weight:700;max-width:22ch}
+.lede p{font-size:14px;line-height:1.6;color:var(--muted);margin-top:var(--s8);max-width:58ch}
+
+/* ---------- Signature: Kaderleiste ---------- */
+.squad{position:relative;padding:var(--s24) var(--s32) var(--s16);margin-top:var(--s8)}
+.squad-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:var(--s24)}
+.squad-head h2{font-family:var(--display);font-size:20px;letter-spacing:.04em;text-transform:uppercase;font-weight:700}
+.squad-head em{font-style:normal;font-size:12px;color:var(--muted);letter-spacing:.02em}
+.band{position:relative;height:160px;display:flex;align-items:stretch;gap:var(--s4)}
+.mid{position:absolute;left:0;right:0;top:64px;height:2px;background:var(--muted);z-index:0}
+.p{position:relative;flex:1;z-index:1}
+.drop{position:absolute;left:50%;width:2px;background:rgba(157,182,206,.35);transform:translateX(-1px)}
+.tile{position:absolute;left:50%;transform:translateX(-50%);width:32px;height:32px;
+  border-radius:var(--r4);display:flex;align-items:center;justify-content:center;
+  font-family:var(--display);font-size:14px;font-weight:700;letter-spacing:.02em}
+.tile.ok{background:#0A3563;border:1px solid #4A719C;color:var(--muted)}
+.tile.watch{background:var(--signal);color:var(--field)}
+.tile.out{background:rgba(226,61,61,.22);border:2px solid var(--stop);color:var(--stop-ink)}
+
+/* ---------- ungleiche Liste ---------- */
+.cases{position:relative;padding:var(--s32) var(--s32) var(--s48);display:grid;
+  grid-template-columns:1.6fr 1fr 1fr;gap:var(--s24);align-items:start}
+.case{background:var(--panel);border-left:4px solid var(--signal);padding:var(--s24);border-radius:0}
+.case.hard{border-left-color:var(--stop)}
+.case .who{display:flex;align-items:baseline;gap:var(--s12);margin-bottom:var(--s8)}
+.case .no{font-family:var(--display);font-size:40px;line-height:.9;color:var(--signal)}
+.case.hard .no{color:var(--stop-ink)}
+.case .nm{font-family:var(--display);font-size:20px;letter-spacing:.02em;text-transform:uppercase;font-weight:700}
+.case .pos{font-size:12px;color:var(--muted);letter-spacing:.02em}
+.case p{font-size:14px;line-height:1.6;color:var(--ink);margin-top:var(--s12)}
+.case .why{font-size:14px;line-height:1.6;color:var(--muted);margin-top:var(--s8)}
+.case .act{margin-top:var(--s16);display:inline-block;background:var(--signal);color:var(--field);
+  font-family:var(--display);font-size:14px;letter-spacing:.06em;text-transform:uppercase;
+  padding:var(--s12) var(--s16);border-radius:var(--r4)}
+.case .act.ghost{background:none;color:var(--ink);border:1px solid var(--line)}
+
+/* ---------- kartenlose Sektion ---------- */
+.plain{position:relative;padding:var(--s32);border-top:1px solid var(--line);
+  display:flex;gap:var(--s64);align-items:baseline}
+.plain div:first-child{max-width:34ch}
+.plain h3{font-family:var(--display);font-size:20px;letter-spacing:.04em;text-transform:uppercase;font-weight:700;margin-bottom:var(--s8)}
+.plain p{font-size:14px;line-height:1.65;color:var(--muted)}
+.stat{display:flex;gap:var(--s48)}
+.stat b{display:block;font-family:var(--display);font-size:40px;line-height:1;color:var(--ink)}
+.stat span{font-size:12px;color:var(--muted);letter-spacing:.06em;text-transform:uppercase;font-family:var(--display)}
+
+/* ---------- Phone ---------- */
+.ph-top{position:relative;padding:var(--s48) var(--s24) var(--s16);display:flex;justify-content:space-between;align-items:flex-end}
+.ph-top .d{font-family:var(--display);font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.ph-top .s{font-family:var(--display);font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--signal)}
+.ph-h{position:relative;padding:0 var(--s24) var(--s24)}
+.ph-h h1{font-family:var(--display);font-size:32px;line-height:1.05;letter-spacing:-.01em;text-transform:uppercase;font-weight:700}
+.ph-h p{font-size:14px;line-height:1.6;color:var(--muted);margin-top:var(--s8)}
+.step{position:relative;padding:var(--s16) var(--s24);border-top:1px solid var(--line)}
+.step .lbl{font-family:var(--display);font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);display:flex;justify-content:space-between}
+.scale{display:flex;gap:var(--s4);margin-top:var(--s16);height:48px}
+.scale i{flex:1;background:#0A3563;font-style:normal}
+.scale i:first-child{border-radius:var(--r4) 0 0 var(--r4)}
+.scale i:last-child{border-radius:0 var(--r4) var(--r4) 0}
+.scale i.f{background:var(--signal)}
+.val{font-family:var(--display);font-size:16px;color:var(--ink);font-weight:700}
+.figure{position:relative;margin-top:var(--s16);display:flex;justify-content:center}
+.ph-cta{position:absolute;left:0;right:0;bottom:0;padding:var(--s24);background:var(--panel);border-top:2px solid var(--signal)}
+.ph-cta .b{display:block;background:var(--signal);color:var(--field);text-align:center;
+  font-family:var(--display);font-size:16px;letter-spacing:.06em;text-transform:uppercase;
+  padding:var(--s16);border-radius:var(--r4)}
+.ph-cta .u{display:block;text-align:center;font-size:14px;color:var(--muted);
+  margin-top:var(--s4);padding:var(--s16) 0}
+
+/* ---------- Detail ---------- */
+.d-head{position:relative;padding:var(--s48) var(--s32) var(--s24);display:flex;align-items:flex-end;gap:var(--s24)}
+.d-no{font-family:var(--display);font-size:72px;line-height:.8;color:var(--signal)}
+.d-head h1{font-family:var(--display);font-size:40px;line-height:1;letter-spacing:-.01em;text-transform:uppercase;font-weight:700}
+.d-head .m{font-size:14px;color:var(--muted);margin-top:var(--s4)}
+.d-head .tag{margin-left:auto;background:none;border:1px solid var(--stop);color:var(--stop-ink);
+  font-family:var(--display);font-size:12px;
+  letter-spacing:.06em;text-transform:uppercase;padding:var(--s8) var(--s12);border-radius:var(--r4)}
+.d-grid{position:relative;padding:0 var(--s32) var(--s48);display:grid;grid-template-columns:2.2fr 1fr;gap:var(--s32)}
+.chart{background:var(--panel);padding:var(--s24)}
+.chart h3{font-family:var(--display);font-size:16px;letter-spacing:.04em;text-transform:uppercase;font-weight:700;margin-bottom:var(--s4)}
+.chart .sub{font-size:12px;color:var(--muted);margin-bottom:var(--s24)}
+.side h3{font-family:var(--display);font-size:16px;letter-spacing:.04em;text-transform:uppercase;font-weight:700;margin-bottom:var(--s16)}
+.row{display:flex;justify-content:space-between;align-items:center;padding:var(--s12) 0;border-bottom:1px solid var(--line);font-size:14px}
+.row b{font-family:var(--display);font-size:16px;font-weight:700}
+.row .w{color:var(--signal)}
+.row .r{color:var(--stop-ink)}
+.note{margin-top:var(--s24);font-size:14px;line-height:1.6;color:var(--muted);border-left:2px solid var(--line);padding-left:var(--s16)}
+</style>
+</head>
+<body>
+
+<!-- ============ 1. TRAINER DASHBOARD ============ -->
+<div>
+<div class="caption">1 — Trainerteam, Kader heute (Desktop)</div>
+<div class="screen desk">
+
+  <svg class="pitch" viewBox="0 0 1280 800" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+    <g fill="none" stroke="#3E5F86" stroke-opacity=".28" stroke-width="2">
+      <path d="M -120 800 A 420 420 0 0 1 300 380"/>
+      <path d="M -120 800 A 620 620 0 0 1 500 180" stroke-dasharray="14 12"/>
+      <path d="M 1400 800 A 420 420 0 0 0 980 380"/>
+      <path d="M 1400 800 A 620 620 0 0 0 780 180" stroke-dasharray="14 12"/>
+      <path d="M 640 96 L 640 800"/>
+    </g>
+  </svg>
+
+  <div class="top">
+    <div class="brand">
+      <div class="crest">BSV</div>
+      <div>
+        <b>Buxtehuder SV</b>
+        <span>Bundesliga Frauen · Saison 2026/27</span>
+      </div>
+    </div>
+    <div class="nav">
+      <span class="on">Kader</span>
+      <span>Spielerinnen</span>
+      <span>Belastung</span>
+      <span>Medizin</span>
+    </div>
+    <div class="clock">Mo 22.09 · 06:41</div>
+  </div>
+
+  <div class="lede">
+    <div class="num">3</div>
+    <div>
+      <h1>Drei brauchen heute deinen Blick</h1>
+      <p>17 von 20 haben eingecheckt. Der Rest liegt im gewohnten Bereich, da musst du nichts tun. Lene fehlt noch, Auswertung ab dem Check-In.</p>
+    </div>
+  </div>
+
+  <div class="squad">
+    <div class="squad-head">
+      <h2>Aufstellung nach Abweichung</h2>
+      <em>Die Linie ist der eigene Schnitt. Wer darunter sitzt, weicht ab.</em>
+    </div>
+    <div class="band">
+      <div class="mid"></div>
+      <div class="p"><div class="tile ok" style="top:42px">1</div></div>
+      <div class="p"><div class="tile ok" style="top:46px">4</div></div>
+      <div class="p"><div class="tile ok" style="top:54px">6</div></div>
+      <div class="p"><div class="tile ok" style="top:40px">7</div></div>
+      <div class="p"><div class="drop" style="top:66px;height:47px"></div><div class="tile out" style="top:113px">9</div></div>
+      <div class="p"><div class="tile ok" style="top:47px">10</div></div>
+      <div class="p"><div class="tile ok" style="top:57px">11</div></div>
+      <div class="p"><div class="drop" style="top:66px;height:31px"></div><div class="tile watch" style="top:97px">13</div></div>
+      <div class="p"><div class="tile ok" style="top:44px">14</div></div>
+      <div class="p"><div class="tile ok" style="top:38px">15</div></div>
+      <div class="p"><div class="tile ok" style="top:52px">17</div></div>
+      <div class="p"><div class="tile ok" style="top:45px">18</div></div>
+      <div class="p"><div class="drop" style="top:66px;height:27px"></div><div class="tile watch" style="top:93px">19</div></div>
+      <div class="p"><div class="tile ok" style="top:41px">21</div></div>
+      <div class="p"><div class="tile ok" style="top:56px">23</div></div>
+      <div class="p"><div class="tile ok" style="top:43px">24</div></div>
+      <div class="p"><div class="tile ok" style="top:47px">27</div></div>
+      <div class="p"><div class="tile ok" style="top:57px">31</div></div>
+    </div>
+  </div>
+
+  <div class="cases">
+    <div class="case hard">
+      <div class="who">
+        <div class="no">9</div>
+        <div>
+          <div class="nm">Merle Vogt</div>
+          <div class="pos">Rückraum links</div>
+        </div>
+      </div>
+      <p>Knie links, dritter Tag in Folge gemeldet. Schlaf kurz, Muskelkater hoch.</p>
+      <div class="why">Das ist die deutlichste Abweichung im Kader. Sie meldet seit Samstag, vorher zwei Wochen ohne Eintrag.</div>
+      <span class="act">An Physio melden</span>
+    </div>
+
+    <div class="case">
+      <div class="who">
+        <div class="no">13</div>
+        <div>
+          <div class="nm">Ida Rohwer</div>
+          <div class="pos">Kreis</div>
+        </div>
+      </div>
+      <p>Schlaf zwei Nächte unter ihrem Schnitt.</p>
+      <div class="why">Keine Beschwerde gemeldet.</div>
+      <span class="act ghost">Verlauf ansehen</span>
+    </div>
+
+    <div class="case">
+      <div class="who">
+        <div class="no">19</div>
+        <div>
+          <div class="nm">Thea Marquardt</div>
+          <div class="pos">Rechtsaußen</div>
+        </div>
+      </div>
+      <p>Schulter rechts, erstmals seit vier Wochen.</p>
+      <div class="why">Einzelmeldung, noch kein Muster.</div>
+      <span class="act ghost">Verlauf ansehen</span>
+    </div>
+  </div>
+
+  <div class="plain">
+    <div>
+      <h3>Gestern im Training</h3>
+      <p>Belastung lag 18 Prozent über dem Schnitt der Vorwoche. Zwei der drei Meldungen kommen aus der Gruppe, die das komplette Programm gemacht hat.</p>
+    </div>
+    <div class="stat">
+      <div><b>17</b><span>Eingecheckt</span></div>
+      <div><b>3</b><span>Offen</span></div>
+      <div><b>92</b><span>Minuten</span></div>
+    </div>
+  </div>
+
+</div>
+</div>
+
+<!-- ============ 2. CHECK-IN ============ -->
+<div>
+<div class="caption">2 — Spielerin, Check-In am Abend (Mobile, zwei Schritte)</div>
+<div style="display:flex;gap:32px">
+<div class="screen phone">
+
+  <svg class="pitch" viewBox="0 0 390 844" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+    <g fill="none" stroke="#3E5F86" stroke-opacity=".26" stroke-width="2">
+      <path d="M -80 300 A 260 260 0 0 1 180 40"/>
+      <path d="M -80 300 A 380 380 0 0 1 300 -80" stroke-dasharray="12 10"/>
+      <path d="M 470 560 A 260 260 0 0 0 210 820"/>
+    </g>
+  </svg>
+
+  <div class="ph-top">
+    <div class="d">Montag, 22. September</div>
+    <div class="s">Tag 14 in Folge</div>
+  </div>
+
+  <div class="ph-h">
+    <h1>Wie geht es dir<br>heute Abend</h1>
+    <p>Vier Fragen, danach bist du durch. Niemand im Team sieht deine Einzelwerte.</p>
+  </div>
+
+  <div class="step">
+    <div class="lbl"><span>Schlaf letzte Nacht</span><span class="val">7 von 10</span></div>
+    <div class="scale">
+      <i class="f"></i><i class="f"></i><i class="f"></i><i class="f"></i><i class="f"></i><i class="f"></i><i class="f"></i><i></i><i></i><i></i>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="lbl"><span>Muskelkater</span><span class="val">4 von 10</span></div>
+    <div class="scale">
+      <i class="f"></i><i class="f"></i><i class="f"></i><i class="f"></i><i></i><i></i><i></i><i></i><i></i><i></i>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="lbl"><span>Stimmung</span><span class="val">6 von 10</span></div>
+    <div class="scale">
+      <i class="f"></i><i class="f"></i><i class="f"></i><i class="f"></i><i class="f"></i><i class="f"></i><i></i><i></i><i></i><i></i>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="lbl"><span>Deine letzten sieben Tage</span></div>
+    <p style="font-size:14px;line-height:1.6;color:var(--muted);margin-top:var(--s12)">
+      Schlaf liegt bei dir sonst um 6,4. Heute bist du darüber.</p>
+  </div>
+
+  <div class="ph-cta">
+    <span class="b">Weiter zu den Beschwerden</span>
+    <span class="u">Noch ein Schritt</span>
+  </div>
+
+</div>
+
+<div class="screen phone">
+
+  <svg class="pitch" viewBox="0 0 390 844" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+    <g fill="none" stroke="#3E5F86" stroke-opacity=".26" stroke-width="2">
+      <path d="M 470 620 A 260 260 0 0 0 210 880"/>
+      <path d="M 560 620 A 380 380 0 0 0 180 1000" stroke-dasharray="12 10"/>
+    </g>
+  </svg>
+
+  <div class="ph-top">
+    <div class="d">Schritt 4 von 4</div>
+    <div class="s">Knie links</div>
+  </div>
+
+  <div class="ph-h">
+    <h1>Wo tut es weh</h1>
+    <p>Tippe die Stelle an. Nur die Medizin sieht, was du hier markierst.</p>
+  </div>
+
+  <div class="step" style="border-top:none;padding-top:0">
+    <div class="figure">
+      <img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA0MDAgMTAwMCI+CjxzdHlsZT4KcGF0aHtmaWxsOiMwQTM1NjM7c3Ryb2tlOnJnYmEoMTU3LDE4MiwyMDYsLjQwKTtzdHJva2Utd2lkdGg6NDtzdHJva2UtbGluZWpvaW46cm91bmR9CiNrbmllX2x7ZmlsbDojRkZEODAwO2ZpbGwtb3BhY2l0eTouODU7c3Ryb2tlOiNGRkQ4MDA7c3Ryb2tlLXdpZHRoOjZ9Cjwvc3R5bGU+Cgo8cGF0aCBpZD0ia29wZiIgZD0iTTE3Ny43IDE0MkwxNzYuNiAxMzguNEwxNzEuOCAxMzAuNUwxNjggMTIxLjZMMTY2LjQgMTE3LjNMMTY1IDExMi44TDE2My41IDEwNS41TDE2Mi4yIDk0LjZMMTYxLjkgODguOEwxNjEuOSA4Mi45TDE2Mi4yIDc3TDE2Mi44IDcwLjdMMTYzLjcgNjQuM0wxNjQuOSA1OC4xTDE2Ni40IDUyLjVMMTY3LjMgNTBMMTY5LjQgNDUuNkwxNzAuNiA0My42TDE3My4zIDQwLjFMMTc0LjcgMzguNUwxNzcuOCAzNS44TDE4MSAzMy41TDE4Mi43IDMyLjZMMTg2LjMgMzEuM0wxOTIuMSAzMC4zTDE5Ni4xIDMwTDIwMS45IDMwTDIwNy45IDMwLjNMMjExLjggMzAuOEwyMTUuNSAzMS45TDIxOSAzMy41TDIyMi4yIDM1LjhMMjIzLjggMzcuMUwyMjYuNyA0MC4xTDIyOS40IDQzLjZMMjMwLjYgNDUuNkwyMzIuNyA1MEwyMzQuNCA1NS4yTDIzNS44IDYxLjFMMjM3LjIgNzAuN0wyMzggODBMMjM4LjIgODUuOEwyMzcuOCA5NC42TDIzNi45IDEwMi45TDIzNS42IDExMC40TDIzMy42IDExNy4zTDIyOC45IDEyOUwyMjcuNSAxMzEuOUwyMjMuNCAxMzguNEwyMjIuMyAxNDJaIi8+CjxwYXRoIGlkPSJuYWNrZW4iIGQ9Ik0yMjIuMyAxNDJMMjIxLjcgMTQ1LjdMMjIxLjUgMTQ5LjFMMjIxLjUgMTU5LjhMMjIxLjkgMTY5LjFMMjIyLjcgMTc3LjVMMjI0LjEgMTg0LjVMMjI2LjkgMTkzLjFMMjI3LjggMTk0LjNMMjI4LjQgMTk0LjlMMjMwLjUgMTk2TDE2OS41IDE5NkwxNzEuNiAxOTQuOUwxNzIuMiAxOTQuM0wxNzMuMSAxOTMuMUwxNzUuOSAxODQuNUwxNzcuMyAxNzcuNUwxNzguMSAxNjkuMUwxNzguNSAxNTkuOEwxNzguNSAxNDkuMUwxNzguMyAxNDUuN0wxNzcuNyAxNDJaIi8+CjxwYXRoIGlkPSJzY2h1bHRlcl9sIiBkPSJNMzE3LjIgMjkyTDI3NS45IDI5MkwyNzQuNSAyNzVMMjMwLjUgMTk2TDIzMiAxOTYuNUwyMzUuNiAxOTcuM0wyNDkuNCAxOTkuNUwyNTUuOCAyMDEuMUwyODMuNyAyMDkuOUwyODggMjExLjRMMjkyIDIxMy4xTDI5NS41IDIxNUwyOTguNiAyMTdMMzAxLjQgMjE5LjNMMzAzLjkgMjIxLjdMMzA2LjIgMjI0LjVMMzA5LjIgMjI5LjJMMzEwLjkgMjMyLjZMMzEyLjQgMjM2LjNMMzE0LjEgMjQyLjZMMzE0LjkgMjQ3LjRMMzE1LjIgMjQ5LjlMMzE1LjUgMjcwLjlaIi8+CjxwYXRoIGlkPSJzY2h1bHRlcl9yIiBkPSJNODIuOCAyOTJMODQuNSAyNzAuOUw4NC44IDI0OS45TDg1LjEgMjQ3LjRMODUuOSAyNDIuNkw4Ny42IDIzNi4zTDg5LjEgMjMyLjZMOTAuOCAyMjkuMkw5My44IDIyNC41TDk2LjEgMjIxLjdMOTguNiAyMTkuM0wxMDEuNCAyMTdMMTA0LjUgMjE1TDEwOCAyMTMuMUwxMTIgMjExLjRMMTE2LjMgMjA5LjlMMTQ0LjIgMjAxLjFMMTUwLjYgMTk5LjVMMTY0LjQgMTk3LjNMMTY4IDE5Ni41TDE2OS41IDE5NkwxMjUuNSAyNzVMMTI0LjEgMjkyWiIvPgo8cGF0aCBpZD0ib2JlcmFybV9sIiBkPSJNMzIyLjMgMzYyTDI4My4xIDM2MkwyNzkuMyAzMzBMMjc1LjkgMjkyTDMxNy4yIDI5MkwzMjAuNSAzMzBaIi8+CjxwYXRoIGlkPSJvYmVyYXJtX3IiIGQ9Ik03Ny43IDM2Mkw3OS41IDMzMEw4Mi44IDI5MkwxMjQuMSAyOTJMMTIwLjcgMzMwTDExNi45IDM2MloiLz4KPHBhdGggaWQ9ImVsbGJvZ2VuX2wiIGQ9Ik0yODMuMSAzNjJMMzIyLjMgMzYyTDMyMy42IDM4NUwzMjQuNCAzOTQuN0wzMjYuMyA0MTJMMjg3LjcgNDEyTDI4Ni42IDM5NC43TDI4NS43IDM4NVoiLz4KPHBhdGggaWQ9ImVsbGJvZ2VuX3IiIGQ9Ik0xMTYuOSAzNjJMMTE0LjMgMzg1TDExMy40IDM5NC43TDExMi4zIDQxMkw3My43IDQxMkw3NS42IDM5NC43TDc2LjQgMzg1TDc3LjcgMzYyWiIvPgo8cGF0aCBpZD0idW50ZXJhcm1fbCIgZD0iTTI4Ny43IDQxMkwzMjYuMyA0MTJMMzI3LjYgNDI1LjdMMzI4LjIgNDM4LjNMMzI4LjMgNDk4TDMwMC41IDQ5OEwyOTAuMyA0MzguM0wyODguNyA0MjUuN1oiLz4KPHBhdGggaWQ9InVudGVyYXJtX3IiIGQ9Ik0xMTIuMyA0MTJMMTExLjMgNDI1LjdMMTA5LjcgNDM4LjNMOTkuNSA0OThMNzEuNyA0OThMNzEuOCA0MzguM0w3Mi40IDQyNS43TDczLjcgNDEyWiIvPgo8cGF0aCBpZD0iaGFuZGdlbGVua19sIiBkPSJNMzMxLjQgNTMyTDMwMy4zIDUzMkwzMDMgNTIyTDMwMi41IDUxNEwzMDEuNyA1MDZMMzAwLjUgNDk4TDMyOC4zIDQ5OEwzMjguNiA1MDZMMzI5LjEgNTE0TDMzMCA1MjJaIi8+CjxwYXRoIGlkPSJoYW5kZ2VsZW5rX3IiIGQ9Ik02OC42IDUzMkw3MCA1MjJMNzAuOSA1MTRMNzEuNCA1MDZMNzEuNyA0OThMOTkuNSA0OThMOTguMyA1MDZMOTcuNSA1MTRMOTcgNTIyTDk2LjcgNTMyWiIvPgo8cGF0aCBpZD0iaGFuZF9maW5nZXJfbCIgZD0iTTMwMy4zIDUzMkwzMzEuNCA1MzJMMzMzLjUgNTQ2TDMzNi42IDU3MC42TDMzOC43IDU5MEwzMzkuNSA2MDUuOUwzMzkuNiA2MTcuMkwzMzkuNCA2MjguNEwzMzkuMSA2MzYuNUwzMzguNSA2NDMuMkwzMzcuOSA2NDcuN0wzMzcuMyA2NTAuM0wzMzYuNyA2NTEuNEwzMzUuMyA2NTNMMzMyLjQgNjU1LjdMMzI5LjggNjU3LjNMMzI4IDY1Ny45TDMyNy4xIDY1OEwzMjYuMyA2NTcuOUwzMjQuNSA2NTcuM0wzMjEuOSA2NTUuN0wzMTkgNjUzTDMxNy41IDY1MC44TDMxMy44IDYzNi41TDMxMC45IDYyMi44TDMwNy42IDYwM0wzMDYuNCA1OTMuNEwzMDUuNyA1ODYuNEwzMDUgNTc0LjdMMzAzLjkgNTUwWiIvPgo8cGF0aCBpZD0iaGFuZF9maW5nZXJfciIgZD0iTTk2LjcgNTMyTDk2LjEgNTUwTDk1IDU3NC43TDk0LjMgNTg2LjRMOTMuNiA1OTMuNEw5Mi40IDYwM0w4OS4xIDYyMi44TDg1LjYgNjM4LjlMODIuOSA2NDkuNkw4Mi4yIDY1MS40TDgwLjQgNjUzLjdMNzcuMyA2NTYuM0w3NC42IDY1Ny43TDcyLjkgNjU4TDcyIDY1Ny45TDY5LjMgNjU2LjlMNjYuNyA2NTVMNjQuMiA2NTIuNEw2Mi43IDY1MC4zTDYxLjkgNjQ2LjVMNjEuMyA2NDEuMkw2MC41IDYyNS42TDYwLjUgNjA1LjlMNjEuMyA1OTBMNjMuNCA1NzAuNkw2Ni41IDU0Nkw2OC42IDUzMloiLz4KPHBhdGggaWQ9ImJydXN0IiBkPSJNMjMwLjUgMTk2TDI3NC41IDI3NUwyNzQuMSAyOTIuMUwyNzMuMiAzMTMuOUwyNzIuMyAzMjkuNkwyNzEuNSAzNDBMMTI4LjUgMzQwTDEyNy43IDMyOS42TDEyNi44IDMxMy45TDEyNS45IDI5Mi4xTDEyNS41IDI3NUwxNjkuNSAxOTZaIi8+CjxwYXRoIGlkPSJiYXVjaCIgZD0iTTI3MS41IDM0MEwyNjkuOSAzNTVMMjY2LjUgMzgwTDI2NS43IDM4NUwyNjEuNyA0MDVMMjYwLjkgNDEwTDI2MC41IDQxNUwyNjAuNSA0MjBMMjYwLjkgNDI1TDI2MS43IDQzMEwyNjQgNDQwTDI2OS4zIDQ1Ny42TDIwMCA0NzhMMTMwLjcgNDU3LjZMMTM2IDQ0MEwxMzguMyA0MzBMMTM5LjEgNDI1TDEzOS41IDQyMEwxMzkuNSA0MTVMMTM5LjEgNDEwTDEzOC4zIDQwNUwxMzQuMyAzODVMMTMzLjUgMzgwTDEzMC4xIDM1NUwxMjguNSAzNDBaIi8+CjxwYXRoIGlkPSJodWVmdGVfbCIgZD0iTTIzNCA1MzUuNEwyMzQgNDY4TDI2OS4zIDQ1Ny42TDI3My40IDQ3MC4yTDI4Mi42IDQ5NS41TDI4NS4yIDUwNC4xTDI4OC4xIDUxNC43TDI4OS4zIDUyMS43TDI5MCA1MzBMMjkwLjEgNTM0LjlMMjg5LjggNTQ0LjRaIi8+CjxwYXRoIGlkPSJodWVmdGVfciIgZD0iTTE2NiA1MzUuNEwxMTAuMiA1NDQuNEwxMDkuOSA1MzQuOUwxMTAgNTMwTDExMC43IDUyMS43TDExMS45IDUxNC43TDExNiA1MDBMMTE5IDQ5MC43TDEyNi42IDQ3MC4yTDEzMC43IDQ1Ny42TDE2NiA0NjhaIi8+CjxwYXRoIGlkPSJsZWlzdGVfbCIgZD0iTTIzNCA0NjhMMjM0IDUzNS40TDIwMy41IDUzMC42TDIwMS40IDUxMC41TDIwMCA1MDBMMjAwIDQ3OFoiLz4KPHBhdGggaWQ9ImxlaXN0ZV9yIiBkPSJNMTY2IDQ2OEwyMDAgNDc4TDIwMCA1MDBMMTk4LjYgNTEwLjVMMTk2LjUgNTMwLjZMMTY2IDUzNS40WiIvPgo8cGF0aCBpZD0ib2JlcnNjaGVua2VsX3Zvcm5lX2wiIGQ9Ik0yMDMuNSA1MzAuNkwyODkuOCA1NDQuNEwyODguOSA1NTcuNUwyODcgNTc1TDI4NS40IDU4Ni41TDI4Mi40IDYwMy45TDI4MC4yIDYxNC45TDI3Ny44IDYyNC44TDI3NS4xIDYzMy4yTDI3MC44IDY0NS40TDI2OCA2NTVMMjExLjcgNjU1TDIxMC40IDYzMC43TDIwNyA1NzYuNkwyMDUuNSA1NTVaIi8+CjxwYXRoIGlkPSJvYmVyc2NoZW5rZWxfdm9ybmVfciIgZD0iTTE5Ni41IDUzMC42TDE5NC41IDU1NUwxOTMgNTc2LjZMMTg5LjYgNjMwLjdMMTg4LjMgNjU1TDEzMiA2NTVMMTI5LjMgNjQ1LjRMMTI0LjkgNjMzLjJMMTIyLjIgNjI0LjhMMTE5LjggNjE0LjlMMTE3LjYgNjAzLjlMMTE0LjYgNTg2LjVMMTEzIDU3NUwxMTEuMSA1NTcuNUwxMTAuMiA1NDQuNFoiLz4KPHBhdGggaWQ9ImtuaWVfbCIgZD0iTTI2OCA2NTVMMjY1LjMgNjY2LjhMMjYxLjIgNjg2LjdMMjU4IDcwNUwyNTYuNiA3MTQuOEwyNTUuMyA3MjcuNUwyNTQuNSA3NDBMMjU0LjIgNzQ4LjlMMjU0LjIgNzYyLjJMMjU0LjQgNzcwTDIxNC4xIDc3MEwyMTMuOCA3MjYuMUwyMTMuNSA3MDVMMjEyLjkgNjg0LjJMMjExLjcgNjU1WiIvPgo8cGF0aCBpZD0ia25pZV9yIiBkPSJNMTMyIDY1NUwxODguMyA2NTVMMTg3LjEgNjg0LjJMMTg2LjUgNzA1TDE4Ni4yIDcyNi4xTDE4NS45IDc3MEwxNDUuNiA3NzBMMTQ1LjcgNzY2LjZMMTQ1LjggNzUzLjNMMTQ1LjUgNzQwTDE0NC43IDcyNy41TDE0My40IDcxNC44TDE0MiA3MDVMMTM4LjggNjg2LjdMMTM0LjcgNjY2LjhaIi8+CjxwYXRoIGlkPSJzY2hpZW5iZWluX2wiIGQ9Ik0yNTQuNCA3NzBMMjU0LjcgNzc4LjlMMjU2LjYgNzkyLjlMMjU2LjggNzk2LjZMMjU2LjggODAwLjZMMjU2LjUgODA1TDI1NS44IDgxMEwyNTQuNyA4MTUuNUwyNTEuOSA4MjcuNUwyNDQuOSA4NTQuNEwyMzkuOCA4NzIuNUwyMzcuMSA4ODQuMkwyMzYuOSA4ODVMMjExIDg4NUwyMTMuNyA4MTYuNUwyMTQuMSA3OTRMMjE0LjEgNzcwWiIvPgo8cGF0aCBpZD0ic2NoaWVuYmVpbl9yIiBkPSJNMTQ1LjYgNzcwTDE4NS45IDc3MEwxODUuOSA3OTRMMTg2LjMgODE2LjVMMTg5IDg4NUwxNjMuMSA4ODVMMTYyLjkgODg0LjJMMTYwLjIgODcyLjVMMTU1LjEgODU0LjRMMTQ4LjEgODI3LjVMMTQ1LjMgODE1LjVMMTQ0LjIgODEwTDE0My41IDgwNUwxNDMuMiA4MDAuNkwxNDMuMiA3OTYuNkwxNDMuNCA3OTIuOUwxNDUuMyA3NzguOVoiLz4KPHBhdGggaWQ9InNwcnVuZ2dlbGVua19sIiBkPSJNMjM2LjkgODg1TDIzMy42IDkwMi44TDIzMi4zIDkxMS4zTDIzMiA5MTVMMjMxLjkgOTE4LjJMMjMyLjEgOTIzLjdMMjMzLjIgOTMwTDIwOC4yIDkzMEwyMDguNyA5MjIuNkwyMTAgOTA1TDIxMSA4ODVaIi8+CjxwYXRoIGlkPSJzcHJ1bmdnZWxlbmtfciIgZD0iTTE2My4xIDg4NUwxODkgODg1TDE5MCA5MDVMMTkxLjQgOTI1TDE5MS44IDkzMEwxNjYuOCA5MzBMMTY3LjkgOTIzLjdMMTY4LjEgOTE4LjJMMTY4IDkxNUwxNjcuNyA5MTEuM0wxNjYuNCA5MDIuOFoiLz4KPHBhdGggaWQ9ImZ1c3NfbCIgZD0iTTIwOC4yIDkzMEwyMzMuMiA5MzBMMjM0LjkgOTM3LjNMMjM2LjIgOTQxLjhMMjQwIDk1MkwyNDIuNSA5NTcuNEwyNDcuMiA5NjYuM0wyNDkuNyA5NzAuNEwyNTAuMyA5NzIuMkwyNTAuMyA5NzNMMjQ5LjkgOTc0LjZMMjQ5IDk3NS45TDI0Ny41IDk3Ny4xTDI0NS42IDk3OEwyNDQuNSA5NzguM0wyNDEuNSA5NzguOEwyMzguMiA5NzguOUwyMzIgOTc5TDIyNy44IDk3OC44TDIxNy45IDk3Ny4zTDIxNS43IDk3Ni41TDIxNC43IDk3NS45TDIxMy44IDk3NUwyMTIgOTcyLjZMMjEwLjQgOTY5LjZMMjA5LjEgOTY2TDIwOC4xIDk2MkwyMDcuOCA5NTkuOEwyMDcuNSA5NTQuOUwyMDcuNSA5NDkuNkwyMDcuOCA5MzcuNloiLz4KPHBhdGggaWQ9ImZ1c3NfciIgZD0iTTE5MS44IDkzMEwxOTIuMiA5MzcuNkwxOTIuNSA5NDkuNkwxOTIuNSA5NTQuOUwxOTIuMiA5NTkuOEwxOTEuOSA5NjJMMTkwLjkgOTY2TDE4OS42IDk2OS42TDE4OCA5NzIuNkwxODYuMiA5NzVMMTg1LjMgOTc1LjlMMTg0LjMgOTc2LjVMMTgyLjEgOTc3LjNMMTcyLjIgOTc4LjhMMTY4IDk3OUwxNjEuOCA5NzguOUwxNTguNSA5NzguOEwxNTUuNSA5NzguM0wxNTQuNCA5NzhMMTUyLjUgOTc3LjFMMTUxIDk3NS45TDE1MC4xIDk3NC42TDE0OS43IDk3M0wxNDkuNyA5NzIuMkwxNTAuMyA5NzAuNEwxNTIuOCA5NjYuM0wxNTcuNSA5NTcuNEwxNjAgOTUyTDE2My44IDk0MS44TDE2NS4xIDkzNy4zTDE2Ni44IDkzMFoiLz4KPC9zdmc+Cg==" width="180" height="450" alt="Silhouette mit markiertem Knie links">
+    </div>
+  </div>
+
+  <div class="ph-cta">
+    <span class="b">Check-In abschicken</span>
+    <span class="u">Keine Beschwerden heute</span>
+  </div>
+
+</div>
+</div>
+</div>
+
+<!-- ============ 3. SPIELERIN DETAIL ============ -->
+<div>
+<div class="caption">3 — Trainerteam, eine Spielerin im Verlauf (Desktop)</div>
+<div class="screen desk" style="min-height:0">
+
+  <svg class="pitch" viewBox="0 0 1280 640" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+    <g fill="none" stroke="#3E5F86" stroke-opacity=".24" stroke-width="2">
+      <path d="M 1400 640 A 420 420 0 0 0 980 220"/>
+      <path d="M 1400 640 A 620 620 0 0 0 780 20" stroke-dasharray="14 12"/>
+      <path d="M 200 0 L 200 640"/>
+    </g>
+  </svg>
+
+  <div class="top">
+    <div class="brand">
+      <div class="crest">BSV</div>
+      <div>
+        <b>Buxtehuder SV</b>
+        <span>Bundesliga Frauen · Saison 2026/27</span>
+      </div>
+    </div>
+    <div class="nav">
+      <span>Kader</span>
+      <span class="on">Spielerinnen</span>
+      <span>Belastung</span>
+      <span>Medizin</span>
+    </div>
+    <div class="clock">Mo 22.09 · 06:44</div>
+  </div>
+
+  <div class="d-head">
+    <div class="d-no">9</div>
+    <div>
+      <h1>Merle Vogt</h1>
+      <div class="m">Rückraum links · 24 Jahre · seit 2024 im Kader</div>
+    </div>
+    <div class="tag">Dritter Tag Knie links</div>
+  </div>
+
+  <div class="d-grid">
+    <div class="chart">
+      <h3>Abstand zur eigenen Norm</h3>
+      <div class="sub">Letzte 21 Tage. Die Linie ist ihr eigener Schnitt, nicht der des Teams.</div>
+      <svg width="100%" height="200" viewBox="0 0 700 200" preserveAspectRatio="none">
+        <line x1="0" y1="100" x2="700" y2="100" stroke="#9DB6CE" stroke-opacity=".3" stroke-width="2"/>
+        <polyline points="0,88 33,80 66,94 100,72 133,86 166,78 200,96 233,84 266,90 300,76 333,92 366,86 400,98 433,104 466,96 500,110 533,118 566,124 600,142 633,156 666,164 700,172"
+          fill="none" stroke="#EAF1F8" stroke-width="3"/>
+        <polyline points="533,118 566,124 600,142 633,156 666,164 700,172"
+          fill="none" stroke="#E23D3D" stroke-width="3"/>
+        <circle cx="700" cy="172" r="6" fill="#E23D3D"/>
+      </svg>
+      <div class="note">Der Abstand wächst seit Samstag. Davor lag sie drei Wochen im gewohnten Bereich, auch an Spieltagen.</div>
+    </div>
+
+    <div class="side">
+      <h3>Heute gemeldet</h3>
+      <div class="row"><span>Schlaf</span><b>4 von 10</b></div>
+      <div class="row"><span>Muskelkater</span><b class="w">7 von 10</b></div>
+      <div class="row"><span>Knie links</span><b class="r">6 von 10</b></div>
+      <div class="row"><span>Stimmung</span><b>5 von 10</b></div>
+      <div class="note">Die Einzelwerte siehst du, weil du Trainerin bist. Was Merle im Freitext an die Medizin schreibt, siehst du nicht.</div>
+    </div>
+  </div>
+
+</div>
+</div>
+
+</body>
+</html>
