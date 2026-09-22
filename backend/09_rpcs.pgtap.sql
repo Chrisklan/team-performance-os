@@ -196,4 +196,142 @@ SELECT ok(
 );
 
 
+
+-- =============================================================================
+-- PUNKT 52 UND 56 (Befunde N3, N4, N8): Teampruefung vor den Schreibstellen
+-- =============================================================================
+--
+-- Was hier NICHT geprueft werden kann: dass nach einer Ablehnung nichts in
+-- app.access_log oder app.medical_clearances stehen BLEIBT. throws_ok laeuft in
+-- einem eigenen Savepoint, die Suite rollt am Ende zurueck, ein "nichts gewachsen"
+-- waere hier wertlos (Lessons Learned, F1). Diese Haelfte ist im Autocommit-Klon
+-- mit zwei Teams gemessen, je Aussage ein eigener psql -f Lauf, und zwar gegen
+-- beide Staende: Audit 2026-09-21, Abschnitt 14.
+--
+-- Die Suite prueft die andere Haelfte: dass die Ablehnung ueberhaupt kommt, dass
+-- die erlaubten Wege unveraendert durchgehen, und dass der erlaubte Weg von
+-- rpc_propose_clearance genau eine Protokollzeile schreibt.
+
+-- Zweites Team, damit "teamfremd" ueberhaupt gemessen werden kann.
+INSERT INTO app.teams (id, name, timezone) VALUES
+  ('a2222222-2222-2222-2222-222222222222', 'Test Team A2', 'Europe/Berlin');
+INSERT INTO app.persons (id, team_id, display_name, person_position, auth_user_id) VALUES
+  ('b2222222-2222-2222-2222-222222222222', 'a2222222-2222-2222-2222-222222222222', 'Player A2', 'player', 'b2222222-2222-2222-2222-222222222222');
+INSERT INTO app.role_assignments (team_id, person_id, role) VALUES
+  ('a2222222-2222-2222-2222-222222222222', 'b2222222-2222-2222-2222-222222222222', 'player');
+
+
+-- --- Der Helper einzeln -------------------------------------------------------
+
+SELECT app._test_set_jwt('{"sub":"44444444-4444-4444-4444-444444444444","role":"authenticated","app_role":"physio","team_id":"11111111-1111-1111-1111-111111111111"}');
+
+SELECT ok(app.auth_target_is_team_player('66666666-6666-6666-6666-666666666666'),
+  'Helper: aktive Spielerin des eigenen Teams ist wahr');
+SELECT ok(NOT app.auth_target_is_team_player('b2222222-2222-2222-2222-222222222222'),
+  'Helper: Spielerin eines fremden Teams ist falsch');
+SELECT ok(NOT app.auth_target_is_team_player(NULL),
+  'Helper: NULL ist falsch, nicht NULL');
+SELECT ok(NOT app.auth_target_is_team_player('00000000-0000-0000-0000-000000000000'),
+  'Helper: unbekannte Id ist falsch');
+SELECT ok(NOT app.auth_target_is_team_player('33333333-3333-3333-3333-333333333333'),
+  'Helper: eigenes Team, aber keine Spielerin (Coach) ist falsch');
+
+UPDATE app.persons SET is_active = false WHERE id = '66666666-6666-6666-6666-666666666666';
+SELECT ok(NOT app.auth_target_is_team_player('66666666-6666-6666-6666-666666666666'),
+  'Helper: deaktivierte Spielerin des eigenen Teams ist falsch');
+UPDATE app.persons SET is_active = true WHERE id = '66666666-6666-6666-6666-666666666666';
+
+SELECT app._test_set_jwt('{"sub":"44444444-4444-4444-4444-444444444444","role":"authenticated","app_role":"physio","team_id":"a2222222-2222-2222-2222-222222222222"}');
+SELECT ok(NOT app.auth_target_is_team_player('66666666-6666-6666-6666-666666666666'),
+  'Helper: falscher team_id Claim bestaetigt kein Team, also falsch');
+
+SELECT ok(NOT has_function_privilege('authenticated', 'app.auth_target_is_team_player(uuid)', 'EXECUTE'),
+  'Helper: kein EXECUTE fuer authenticated');
+SELECT ok(NOT has_function_privilege('anon', 'app.auth_target_is_team_player(uuid)', 'EXECUTE'),
+  'Helper: kein EXECUTE fuer anon');
+
+
+-- --- N3: Protokollzeile ueber eine teamfremde Person ---------------------------
+
+SELECT app._test_set_jwt('{"sub":"33333333-3333-3333-3333-333333333333","role":"authenticated","app_role":"coach","team_id":"11111111-1111-1111-1111-111111111111"}');
+SELECT throws_ok(
+  $$SELECT * FROM app.rpc_get_clearance('b2222222-2222-2222-2222-222222222222')$$,
+  '42501', 'FORBIDDEN: medical_clearances.get',
+  'Punkt 52 (N3): rpc_get_clearance blockt eine teamfremde Person');
+SELECT lives_ok(
+  $$SELECT * FROM app.rpc_get_clearance('66666666-6666-6666-6666-666666666666')$$,
+  'Positivkontrolle: rpc_get_clearance laeuft fuer die eigene Spielerin unveraendert');
+
+SELECT app._test_set_jwt('{"sub":"44444444-4444-4444-4444-444444444444","role":"authenticated","app_role":"physio","team_id":"11111111-1111-1111-1111-111111111111"}');
+SELECT throws_ok(
+  $$SELECT * FROM app.rpc_readiness_full('b2222222-2222-2222-2222-222222222222', '2026-09-01', '2026-09-30')$$,
+  '42501', 'FORBIDDEN: readiness_scores.full',
+  'Punkt 52 (N3): rpc_readiness_full blockt eine teamfremde Person');
+SELECT lives_ok(
+  $$SELECT * FROM app.rpc_readiness_full('66666666-6666-6666-6666-666666666666', '2026-09-01', '2026-09-30')$$,
+  'Positivkontrolle: rpc_readiness_full laeuft fuer die eigene Spielerin unveraendert');
+
+
+-- --- N4: Freigabe fuer eine teamfremde Person ---------------------------------
+
+SELECT app._test_set_jwt('{"sub":"55555555-5555-5555-5555-555555555555","role":"authenticated","app_role":"doctor","team_id":"11111111-1111-1111-1111-111111111111"}');
+SELECT throws_ok(
+  $$SELECT * FROM app.rpc_set_clearance('b2222222-2222-2222-2222-222222222222', 'blocked', 'quer', '2026-09-03', NULL)$$,
+  '42501', 'FORBIDDEN: medical_clearances.set',
+  'Punkt 52 (N4): rpc_set_clearance blockt eine teamfremde Person');
+SELECT lives_ok(
+  $$SELECT * FROM app.rpc_set_clearance('66666666-6666-6666-6666-666666666666', 'full', 'eigen', '2026-09-03', NULL)$$,
+  'Positivkontrolle: rpc_set_clearance laeuft fuer die eigene Spielerin unveraendert');
+
+
+-- --- Punkt 56: dieselbe Luecke in rpc_propose_clearance, und die Protokollzeile
+
+SELECT app._test_set_jwt('{"sub":"44444444-4444-4444-4444-444444444444","role":"authenticated","app_role":"physio","team_id":"11111111-1111-1111-1111-111111111111"}');
+SELECT throws_ok(
+  $$SELECT * FROM app.rpc_propose_clearance('b2222222-2222-2222-2222-222222222222', 'individual', 'quer')$$,
+  '42501', 'FORBIDDEN: medical_clearances.propose',
+  'Punkt 56: rpc_propose_clearance blockt eine teamfremde Person');
+
+CREATE TEMP TABLE _n8_vorher AS
+  SELECT (SELECT count(*) FROM app.access_log)         AS log,
+         (SELECT count(*) FROM app.medical_clearances) AS clr;
+
+SELECT lives_ok(
+  $$SELECT * FROM app.rpc_propose_clearance('66666666-6666-6666-6666-666666666666', 'individual', 'Vorschlag Physio')$$,
+  'Positivkontrolle: rpc_propose_clearance laeuft fuer die eigene Spielerin unveraendert');
+
+SELECT is((SELECT count(*) FROM app.medical_clearances) - (SELECT clr FROM _n8_vorher), 1::bigint,
+  'rpc_propose_clearance schreibt weiterhin genau eine Zeile in medical_clearances');
+SELECT is((SELECT count(*) FROM app.access_log) - (SELECT log FROM _n8_vorher), 1::bigint,
+  'Punkt 56 (N8): rpc_propose_clearance schreibt jetzt genau eine Zeile in access_log');
+SELECT is((SELECT action FROM app.access_log ORDER BY id DESC LIMIT 1), 'write',
+  'Punkt 56 (N8): die neue Zeile traegt action = write, wie bei rpc_set_clearance');
+SELECT is((SELECT actor_role::text FROM app.access_log ORDER BY id DESC LIMIT 1), 'physio',
+  'Punkt 56 (N8): die neue Zeile traegt actor_role = physio, Vorschlag und Entscheidung bleiben unterscheidbar');
+SELECT is((SELECT subject_id FROM app.access_log ORDER BY id DESC LIMIT 1),
+  '66666666-6666-6666-6666-666666666666'::uuid,
+  'Punkt 56 (N8): die neue Zeile nennt die Spielerin als subject_id');
+
+
+-- --- Kein Auseinanderlaufen der beiden Fassungen ------------------------------
+--
+-- app.rpc_body_map_region_reports traegt ihr Praedikat eingebaut (20_denial_answer.sql),
+-- die vier Funktionen aus Punkt 52 und 56 nutzen den Helper. Beide muessen dieselbe
+-- Antwort geben. Der Test ist verhaltensbasiert: als Physio faellt bei region_reports
+-- jeder andere Ablehnungsgrund weg, uebrig bleibt genau die Personenpruefung.
+
+SELECT app._test_set_jwt('{"sub":"44444444-4444-4444-4444-444444444444","role":"authenticated","app_role":"physio","team_id":"11111111-1111-1111-1111-111111111111"}');
+SELECT is(
+  (SELECT count(*) FROM (VALUES
+      ('66666666-6666-6666-6666-666666666666'::uuid),
+      ('b2222222-2222-2222-2222-222222222222'::uuid),
+      ('33333333-3333-3333-3333-333333333333'::uuid),
+      ('00000000-0000-0000-0000-000000000000'::uuid),
+      (NULL::uuid)) v(pid)
+    WHERE app.is_denial(app.rpc_body_map_region_reports(v.pid, 28))
+          IS DISTINCT FROM (NOT app.auth_target_is_team_player(v.pid))),
+  0::bigint,
+  'Helper und das eingebaute Praedikat in rpc_body_map_region_reports entscheiden gleich');
+
+
 SELECT finish();
