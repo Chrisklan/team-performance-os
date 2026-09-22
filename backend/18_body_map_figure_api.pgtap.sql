@@ -8,11 +8,19 @@
 -- Die Suite prueft die Tuer, nicht die Aufloesung (das macht Suite 17): dass sie
 -- nur fuer angemeldete Personen offen ist, dass sie nur die eigene Zeile beruehrt
 -- und dass sie nichts zurueckgibt, was nicht Darstellung ist.
+--
+-- Punkt 54 (2026-09-22, Befund N1, backend/25_figure_guard.sql): Abschnitt 5 kam dazu.
+-- Der Waechter ist seither app.auth_team_id() IS NOT NULL, nicht mehr nur
+-- auth_person_id(). Geprueft wird jede der vier Lagen, die Stufe 2 von ADR-015 von
+-- Stufe 1 trennt, je einmal lesend und einmal schreibend, dazu die Ablehnungszeile.
+-- Was diese Suite NICHT beweisen kann: dass die Zeile den Commit ueberlebt. pgTAP
+-- laeuft in einer Transaktion und rollt am Ende zurueck. Der Beweis dafuer steht im
+-- Autocommit-Klon (Audit 2026-09-21, Abschnitt 13).
 -- =============================================================================
 
 BEGIN;
 SET search_path = public, pgtap;
-SELECT plan(22);
+SELECT plan(40);
 
 INSERT INTO app.teams (id, name, timezone, squad_type) VALUES
   ('18181818-1818-1818-1818-181818181818', 'Tuer Kader', 'Europe/Berlin', 'frauen');
@@ -115,6 +123,91 @@ SELECT public.rpc_set_my_body_map_figure('neutral');
 RESET ROLE;
 SELECT is((SELECT count(*)::text FROM app.audit_log), current_setting('tpos.audit_before'),
   'Denselben Wert erneut zu setzen laesst das audit_log unveraendert');
+
+-- ---------------------------------------------------------------------------
+-- 5. Punkt 54: bestaetigtes Team, nicht nur eine aufgeloeste Person (18)
+-- ---------------------------------------------------------------------------
+-- Spielerin B wird deaktiviert und bekommt danach dieselben Claims wie vorher.
+-- Ihr Token ist unveraendert gueltig, die Datenbank sperrt trotzdem (ADR-015).
+UPDATE app.persons SET is_active = false WHERE id = 'e1000000-0000-0000-0000-000000000002';
+
+SET ROLE authenticated;
+SELECT app._t_jwt18('e2000000-0000-0000-0000-000000000002', 'player');
+SELECT ok(app.is_denial((SELECT public.rpc_my_body_map_figure())),
+  'Deaktivierte Person: Lesen wird abgelehnt');
+SELECT is((SELECT public.rpc_my_body_map_figure() ->> 'message'), 'FORBIDDEN: persons.body_map_figure',
+  'Und zwar mit dem Wortlaut des Vertrags aus Muster D');
+SELECT ok(app.is_denial((SELECT public.rpc_set_my_body_map_figure('maennlich'))),
+  'Deaktivierte Person: Schreiben wird abgelehnt. Das war der Kern von N1');
+RESET ROLE;
+SELECT is((SELECT body_map_figure::text FROM app.persons WHERE id = 'e1000000-0000-0000-0000-000000000002'),
+  'aus_dem_team', 'Und die Zeile in app.persons ist unberuehrt geblieben');
+SELECT is((SELECT count(*)::int FROM app.access_denials
+            WHERE resource = 'persons.body_map_figure'
+              AND actor_id = 'e1000000-0000-0000-0000-000000000002'),
+  3, 'Drei Ablehnungen, drei Zeilen. Vorher schrieb diese Tuer nie eine');
+SELECT is((SELECT count(DISTINCT team_id)::int FROM app.access_denials
+            WHERE actor_id = 'e1000000-0000-0000-0000-000000000002'),
+  1, 'Alle im Team, in dem die Datenbank die Person fuehrt, nicht im behaupteten');
+
+UPDATE app.persons SET is_active = true WHERE id = 'e1000000-0000-0000-0000-000000000002';
+
+-- Falscher team_id Claim, Person aktiv. auth_team_id() vergleicht den Claim mit
+-- persons.team_id und findet nichts.
+SET ROLE authenticated;
+SELECT set_config('request.jwt.claims',
+  '{"sub":"e2000000-0000-0000-0000-000000000002","role":"authenticated","app_role":"player","team_id":"18181818-1818-1818-1818-181818181819"}',
+  true);
+SELECT ok(app.is_denial((SELECT public.rpc_my_body_map_figure())),
+  'Falscher team_id Claim: Lesen wird abgelehnt');
+SELECT ok(app.is_denial((SELECT public.rpc_set_my_body_map_figure('maennlich'))),
+  'Falscher team_id Claim: Schreiben wird abgelehnt');
+RESET ROLE;
+SELECT is((SELECT body_map_figure::text FROM app.persons WHERE id = 'e1000000-0000-0000-0000-000000000002'),
+  'aus_dem_team', 'Zeile weiter unberuehrt');
+
+-- Falscher Rollen-Claim, Person aktiv und im richtigen Team. Die Rolle steht so
+-- nicht in role_assignments, auth_team_id() bestaetigt sie deshalb nicht.
+SET ROLE authenticated;
+SELECT app._t_jwt18('e2000000-0000-0000-0000-000000000002', 'doctor');
+SELECT ok(app.is_denial((SELECT public.rpc_my_body_map_figure())),
+  'Falscher Rollen-Claim: Lesen wird abgelehnt');
+SELECT ok(app.is_denial((SELECT public.rpc_set_my_body_map_figure('maennlich'))),
+  'Falscher Rollen-Claim: Schreiben wird abgelehnt');
+RESET ROLE;
+SELECT is((SELECT body_map_figure::text FROM app.persons WHERE id = 'e1000000-0000-0000-0000-000000000002'),
+  'aus_dem_team', 'Zeile weiter unberuehrt');
+SELECT is((SELECT actor_role::text FROM app.access_denials
+            WHERE actor_id = 'e1000000-0000-0000-0000-000000000002'
+            ORDER BY id DESC LIMIT 1),
+  'doctor', 'Die Zeile haelt die Rolle fest, mit der angeklopft wurde, nicht die echte');
+
+-- Positivkontrolle. Ohne sie beweist ein "ueberall abgelehnt" nur, dass der Aufbau
+-- nicht traegt. Das ist die wichtigste Zeile dieses Abschnitts: die Player App ruft
+-- beide Tueren im Check-in-Weg, ein zu scharfer Waechter sperrt jede Spielerin aus.
+SET ROLE authenticated;
+SELECT app._t_jwt18('e2000000-0000-0000-0000-000000000002', 'player');
+SELECT is((public.rpc_my_body_map_figure() ->> 'figure'), 'weiblich',
+  'Aktive Spielerin des eigenen Teams liest unveraendert weiter');
+SELECT is((public.rpc_set_my_body_map_figure('neutral') ->> 'preference'), 'neutral',
+  'Und schreibt unveraendert weiter');
+RESET ROLE;
+SELECT is((SELECT count(*)::int FROM app.access_denials
+            WHERE actor_id = 'e1000000-0000-0000-0000-000000000002'),
+  7, 'Der Erfolgsweg hat keine weitere Ablehnung geschrieben');
+
+-- Der Waechter prueft kein role_assignments.role. Die Figur ist Darstellung, jede
+-- Person des Teams stellt ihre eigene um (Abschnitt 4 zeigt das fuer die Trainerin).
+SELECT is((SELECT count(*)::int FROM pg_proc p
+            WHERE p.pronamespace = 'app'::regnamespace
+              AND p.proname IN ('rpc_my_body_map_figure', 'rpc_set_my_body_map_figure')
+              AND pg_get_functiondef(p.oid) LIKE '%auth_team_id() IS NULL%'),
+  2, 'Beide app Funktionen tragen die Bedingung im Rumpf, nicht nur eine');
+SELECT is((SELECT count(*)::int FROM pg_proc p
+            WHERE p.pronamespace = 'app'::regnamespace
+              AND p.proname IN ('rpc_my_body_map_figure', 'rpc_set_my_body_map_figure')
+              AND pg_get_functiondef(p.oid) LIKE '%auth_has_role%'),
+  0, 'Und keine der beiden prueft eine Rolle: das sperrte Trainerin, Physio und Arzt aus');
 
 -- ---------------------------------------------------------------------------
 -- Ohne Anmeldung
