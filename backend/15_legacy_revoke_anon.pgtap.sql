@@ -82,5 +82,28 @@ SELECT is(has_schema_privilege('supabase_auth_admin', 'app', 'USAGE'), true,
   'supabase_auth_admin hat weiter USAGE auf app, sonst scheitert jeder Login');
 
 
+-- =============================================================================
+-- 4. Die beiden Legacy Definer RPCs sind zu (Befund N9, 2026-09-22)
+--
+-- public.rpc_morning_ops(date) und public.rpc_player_drilldown(uuid, date) sind
+-- SECURITY DEFINER mit einem Eigentuemer, der rolbypassrls traegt. Sie lesen
+-- die Basistabellen direkt, nicht ueber die Sichten, und der Schluss des
+-- Legacy Gates (Migration 20260922000034) erreicht sie deshalb nicht.
+--
+-- EHRLICH GESAGT, was dieser Test hier leistet und was nicht: in
+-- tpos_gate_test liegen die beiden Funktionen gar nicht, die Zaehlung ist hier
+-- 0, weil nichts da ist. Der Test faengt den Tag, an dem jemand den Legacy
+-- Pfad in diese Datenbank zieht, ohne den Entzug mitzunehmen. Der Beweis fuer
+-- die Cloud ist die Messung im Audit, Abschnitt 12, nicht diese Zeile.
+-- =============================================================================
+
+SELECT is((SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+            WHERE n.nspname = 'public'
+              AND p.proname IN ('rpc_morning_ops', 'rpc_player_drilldown')
+              AND (has_function_privilege('anon', p.oid, 'EXECUTE')
+                OR has_function_privilege('authenticated', p.oid, 'EXECUTE'))), 0::bigint,
+  'Legacy Definer RPCs: weder anon noch authenticated koennen sie ausfuehren');
+
+
 SELECT * FROM finish();
 ROLLBACK;
