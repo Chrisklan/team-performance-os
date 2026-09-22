@@ -1,0 +1,58 @@
+-- Migration 20260921000032_access_log_revoke.sql (AP-45e, Befund F4)
+-- Quelle: backend/21_access_log_revoke.sql (identisch). Tests: backend/21_access_log_revoke.pgtap.sql.
+-- Nimmt authenticated das INSERT Recht auf app.access_log und entfernt die
+-- Policy access_log_insert_definer. Schreibt und aendert keine Zeile.
+
+-- =============================================================================
+-- 21_access_log_revoke.sql — INSERT Recht auf app.access_log fuer authenticated
+-- entziehen (AP-45e, Befund F4 der Gegenlesung)
+--
+-- F4 (Audits/2026-09-21-ap45-bodymap-verlauf, Abschnitt 7): authenticated hat
+-- INSERT auf app.access_log und eine Policy access_log_insert_definer
+-- (team_id = eigenes Team). Der Versuch scheitert heute allein daran, dass
+-- authenticated keine USAGE auf access_log_id_seq hat (permission denied for
+-- sequence access_log_id_seq, gemessen 2026-09-21 und erneut im Klon vor
+-- dieser Migration, 2026-09-22). Wer je GRANT ... ON ALL SEQUENCES IN SCHEMA
+-- app setzt, oeffnet die Faelschung des Zugriffsprotokolls durch einen
+-- direkten INSERT.
+--
+-- Erhebung vor dieser Migration (AP-45e, Schritt 1, nur lesend, 2026-09-22):
+-- geschrieben wird in app.access_log aus SECHS SECURITY DEFINER Funktionen,
+-- nicht nur aus app.rpc_body_map_region_reports wie der Startprompt annahm:
+--   app.rpc_check_ins_medical, app.rpc_readiness_full, app.rpc_get_clearance,
+--   app.rpc_set_clearance, app.rpc_export_my_data, app.rpc_body_map_region_reports
+-- Alle sechs sind SECURITY DEFINER, keine traegt ein eigenes ALTER FUNCTION
+-- ... OWNER TO. Der Eigentuemer ist also die Rolle, die die Migration
+-- ausfuehrt (Cloud: postgres, lokal gemessen: der Rollenname des Migrations-
+-- laufs), nie authenticated. Eine SECURITY DEFINER Funktion schreibt mit den
+-- Rechten ihres Eigentuemers, das GRANT INSERT an authenticated ist fuer
+-- keinen der sechs Wege die Bedingung. Der Entzug trifft also keinen davon.
+-- Diese Abweichung vom Startprompt wurde Chris im Chat vorgelegt und mit
+-- "weiterbauen" freigegeben.
+--
+-- Bestandswahrung, gemessen im Klon vor dieser Migration (createdb -h /tmp -T
+-- tpos_gate_test, Autocommit, SET ROLE authenticated, echte JWT Claims):
+--   direkter INSERT als authenticated:  permission denied for sequence
+--     access_log_id_seq (unveraendert gegenueber der Messung vom 2026-09-21)
+--   app.rpc_get_clearance (DEFINER Weg, stellvertretend fuer alle sechs, von
+--     physio fuer eine Spielerin des eigenen Teams gerufen):
+--     access_log 0 vor dem Aufruf, 1 danach
+--   app.rpc_get_my_access_log (Spielerin liest per Definer Weg die eigene
+--     Zeile): liefert genau diese Zeile
+--
+-- Diese Migration nimmt genau ein Recht und eine Policy, sonst nichts:
+--   REVOKE INSERT ON app.access_log FROM authenticated
+--   DROP POLICY access_log_insert_definer ON app.access_log
+-- Die Policy heisst "definer", war aber nie auf SECURITY DEFINER Aufrufe
+-- beschraenkt: sie galt fuer jeden INSERT von authenticated mit passendem
+-- team_id, gleich ob direkt oder ueber eine Funktion. Sie wird fuer keinen der
+-- sechs Schreibwege gebraucht (die laufen als Eigentuemer, nicht als
+-- authenticated), sie deckte nur den Fehlerfall ab, den die fehlende
+-- Sequenzberechtigung bisher schon verhindert hat.
+--
+-- Voraussetzung: 09_rpcs.sql. Idempotent (REVOKE und DROP POLICY IF EXISTS).
+-- Tests: backend/21_access_log_revoke.pgtap.sql.
+-- =============================================================================
+
+REVOKE INSERT ON app.access_log FROM authenticated;
+DROP POLICY IF EXISTS access_log_insert_definer ON app.access_log;
