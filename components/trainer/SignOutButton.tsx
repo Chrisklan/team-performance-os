@@ -11,13 +11,13 @@ export function SignOutButton({
 }: SignOutButtonProps) {
   const style =
     variant === "primary"
-      ? "bg-accent text-surface font-bold hover:bg-accent/90"
-      : "border border-muted text-ink hover:border-accent";
+      ? "bg-signal text-field font-bold hover:bg-signal/90"
+      : "border border-muted text-ink hover:border-signal";
   return (
     <form action="/auth/signout" method="post">
       <button
         type="submit"
-        className={`flex h-12 items-center justify-center rounded-md px-4 text-sm transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-accent ${style}`}
+        className={`flex h-12 items-center justify-center rounded-md px-4 text-sm transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-signal ${style}`}
       >
         {label}
       </button>

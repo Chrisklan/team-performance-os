@@ -14,7 +14,7 @@ function SubmitButton() {
     <button
       type="submit"
       disabled={pending}
-      className="flex h-12 w-full items-center justify-center rounded-md bg-accent px-4 text-base font-bold text-surface transition-colors hover:bg-accent/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-ink focus-visible:ring-offset-2 focus-visible:ring-offset-surface-card disabled:cursor-wait disabled:opacity-60"
+      className="flex h-12 w-full items-center justify-center rounded-md bg-signal px-4 text-base font-bold text-field transition-colors hover:bg-signal/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-ink focus-visible:ring-offset-2 focus-visible:ring-offset-panel disabled:cursor-wait disabled:opacity-60"
     >
       {pending ? "Link wird gesendet" : "Anmeldelink senden"}
     </button>
@@ -38,7 +38,7 @@ export function LoginForm({ next }: { next: string }) {
           <input type="hidden" name="email" value={state.email} />
           <button
             type="submit"
-            className="h-12 rounded-md px-3 text-sm font-bold text-accent underline-offset-4 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            className="h-12 rounded-md px-3 text-sm font-bold text-signal underline-offset-4 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-signal"
           >
             Link erneut senden
           </button>
@@ -73,10 +73,10 @@ export function LoginForm({ next }: { next: string }) {
           defaultValue={"email" in state ? state.email : ""}
           aria-invalid={message ? true : undefined}
           aria-describedby={message ? "login-message" : "login-hint"}
-          className="h-12 w-full rounded-md border border-muted bg-surface px-4 text-base text-ink placeholder:text-muted focus:outline-none focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-accent"
+          className="h-12 w-full rounded-md border border-muted bg-field px-4 text-base text-ink placeholder:text-muted focus:outline-none focus-visible:border-signal focus-visible:ring-2 focus-visible:ring-signal"
         />
         {message ? (
-          <p id="login-message" role="alert" className="text-sm text-warn-text">
+          <p id="login-message" role="alert" className="text-sm text-stop-ink">
             {message}
           </p>
         ) : (

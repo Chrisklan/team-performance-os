@@ -20,10 +20,12 @@ const MEDICAL_ICON: Record<MedicalStatus, string> = {
   red: "🔴",
 };
 
+// needs_decision an Chris (AP-54): niedrig/mittel/hoch ohne v1.0-Anker, mittel kollidiert
+// mit signal (jetzt Gelb). Werte aus v0.5 unveraendert uebernommen, siehe AP-54 Rueckmeldung.
 function factorBarColor(value: number): string {
-  if (value < 50) return "bg-warn";
-  if (value < 70) return "bg-accent";
-  return "bg-ok";
+  if (value < 50) return "bg-stop";
+  if (value < 70) return "bg-[#3E8EFF]";
+  return "bg-[#3FB87A]";
 }
 
 type PlayerCardProps = {
@@ -40,8 +42,8 @@ export function PlayerCard({ member, onSelect }: PlayerCardProps) {
     <button
       type="button"
       onClick={() => onSelect(member)}
-      className={`flex w-full flex-col gap-4 rounded-lg border bg-surface-card p-6 text-left transition-colors hover:border-accent/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
-        auffaellig ? "border-warn/60" : "border-white/5"
+      className={`flex w-full flex-col gap-4 rounded-lg border bg-panel p-6 text-left transition-colors hover:border-signal/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-signal ${
+        auffaellig ? "border-stop/60" : "border-white/5"
       }`}
       aria-label={`${player.name}, Rückennummer ${player.jersey}, ${player.position}. ${
         hasCheckIn ? `Readiness ${readiness.value}` : "Kein Check-in"

@@ -40,10 +40,10 @@ export function KaderGrid({ members }: KaderGridProps) {
             type="button"
             onClick={() => setSortMode("attention")}
             aria-pressed={sortMode === "attention"}
-            className={`flex h-12 items-center rounded-sm px-3 text-sm font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+            className={`flex h-12 items-center rounded-sm border-b-2 px-3 text-sm font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-signal ${
               sortMode === "attention"
-                ? "bg-accent text-surface"
-                : "bg-white/5 text-muted hover:text-ink"
+                ? "border-signal bg-white/5 text-ink"
+                : "border-transparent bg-white/5 text-muted hover:text-ink"
             }`}
           >
             Attention-first
@@ -52,10 +52,10 @@ export function KaderGrid({ members }: KaderGridProps) {
             type="button"
             onClick={() => setSortMode("jersey")}
             aria-pressed={sortMode === "jersey"}
-            className={`flex h-12 items-center rounded-sm px-3 text-sm font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+            className={`flex h-12 items-center rounded-sm border-b-2 px-3 text-sm font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-signal ${
               sortMode === "jersey"
-                ? "bg-accent text-surface"
-                : "bg-white/5 text-muted hover:text-ink"
+                ? "border-signal bg-white/5 text-ink"
+                : "border-transparent bg-white/5 text-muted hover:text-ink"
             }`}
           >
             Rückennummer
@@ -67,7 +67,7 @@ export function KaderGrid({ members }: KaderGridProps) {
             type="checkbox"
             checked={onlyAuffaellig}
             onChange={(event) => setOnlyAuffaellig(event.target.checked)}
-            className="h-4 w-4 accent-accent"
+            className="h-4 w-4 accent-signal"
           />
           Nur Auffällige
         </label>

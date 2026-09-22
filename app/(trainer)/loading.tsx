@@ -13,7 +13,7 @@ export default function TrainerLoading() {
         {Array.from({ length: 6 }).map((_, index) => (
           <div
             key={index}
-            className="h-48 rounded-lg border border-white/5 bg-surface-card motion-safe:animate-pulse"
+            className="h-48 rounded-lg border border-white/5 bg-panel motion-safe:animate-pulse"
           />
         ))}
       </div>

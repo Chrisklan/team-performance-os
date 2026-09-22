@@ -46,9 +46,10 @@ export default async function TrainerDashboardPage() {
         </h1>
         <div className="flex items-center gap-4">
           <span className="flex items-center gap-2 text-sm text-muted">
+            {/* needs_decision an Chris (AP-54): "ok" hat in v1.0 keinen Anker, Wert aus v0.5 unveraendert. */}
             <span
               aria-hidden="true"
-              className={`h-2 w-2 rounded-full ${isLive ? "bg-ok" : "bg-muted"}`}
+              className={`h-2 w-2 rounded-full ${isLive ? "bg-[#3FB87A]" : "bg-muted"}`}
             />
             {isLive ? "Live" : "Letzter Sync"}
           </span>

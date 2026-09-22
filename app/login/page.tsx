@@ -45,7 +45,7 @@ export default function LoginPage({
         </div>
       </section>
 
-      <section className="flex flex-col justify-start gap-6 border-t border-white/5 bg-surface-card px-6 py-12 lg:justify-center lg:border-l lg:border-t-0 lg:px-12">
+      <section className="flex flex-col justify-start gap-6 border-t border-white/5 bg-panel px-6 py-12 lg:justify-center lg:border-l lg:border-t-0 lg:px-12">
         <div className="flex w-full max-w-md flex-col gap-6">
           <h2 className="text-xl font-bold text-ink">Anmelden</h2>
           {notice ? (
@@ -53,7 +53,7 @@ export default function LoginPage({
               role={isError ? "alert" : "status"}
               className={`rounded-md border px-4 py-3 text-sm ${
                 isError
-                  ? "border-warn/60 text-warn-text"
+                  ? "border-stop/60 text-stop-ink"
                   : "border-white/10 text-muted"
               }`}
             >

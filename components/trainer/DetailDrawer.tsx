@@ -95,7 +95,7 @@ export function DetailDrawer({ member, onClose }: DetailDrawerProps) {
         role="dialog"
         aria-modal="true"
         aria-labelledby="detail-drawer-title"
-        className="relative flex h-full w-full max-w-md flex-col gap-8 overflow-y-auto border-l border-white/10 bg-surface-card p-8"
+        className="relative flex h-full w-full max-w-md flex-col gap-8 overflow-y-auto border-l border-white/10 bg-panel p-8"
       >
         <div className="flex items-start justify-between gap-4">
           <div>
@@ -110,7 +110,7 @@ export function DetailDrawer({ member, onClose }: DetailDrawerProps) {
             ref={closeButtonRef}
             type="button"
             onClick={onClose}
-            className="rounded-sm px-3 py-2 text-sm text-muted hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            className="rounded-sm px-3 py-2 text-sm text-muted hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-signal"
           >
             Schließen
           </button>
@@ -154,7 +154,7 @@ export function DetailDrawer({ member, onClose }: DetailDrawerProps) {
                   <div className="h-2 flex-1 rounded-full bg-white/5">
                     {value !== null && (
                       <div
-                        className="h-full rounded-full bg-accent"
+                        className="h-full rounded-full bg-muted"
                         style={{ width: `${value}%` }}
                       />
                     )}

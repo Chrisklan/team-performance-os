@@ -9,31 +9,30 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        // Design-Tokens v0.2 (Team Performance OS)
-        surface: {
-          DEFAULT: "#0F1620", // Primary Surface (tiefes Graphit-Nachtblau)
-          card: "#16212E", // Secondary Surface / Cards
-        },
-        accent: "#3E8EFF", // Signal / Primär-Aktion (ruhiges Sport-Blau)
-        warn: "#E23D3D", // Semantik Aufmerksamkeit/Warnung (gedämpftes Rot)
-        "warn-text": "#FF8A8A", // Warn-Ton für Fließtext auf Karten (Kontrast 7,2:1, #E23D3D erreicht nur 3,9:1)
-        ok: "#3FB87A", // Semantik Positiv (ruhiges Grün)
-        ink: "#E6EDF3", // Text/Neutral auf Dunkel
-        muted: "#8A98A8", // gedämpfter Neutrralton für Sekundärtext
+        // Design-Tokens v1.0 Marine, Anker bsv-live.de (docs/design/README.md).
+        // Verbindliche Namen, gemessen, nicht abgeleitet. Niemand erfindet Zwischenwerte.
+        field: "#04284C",
+        panel: "#063E75",
+        signal: "#FFD800",
+        ink: "#EAF1F8",
+        muted: "#9DB6CE",
+        stop: "#E23D3D",
+        "stop-ink": "#FF8A8A",
       },
       fontFamily: {
-        sans: ["Switzer", "system-ui", "-apple-system", "Segoe UI", "sans-serif"],
+        sans: ["Roboto", "system-ui", "-apple-system", "Segoe UI", "sans-serif"],
+        display: ["Roboto Condensed", "system-ui", "-apple-system", "Segoe UI", "sans-serif"],
       },
       fontSize: {
-        // Type-Skala (Build-Zwang): 12/14/16/20/24/32/40/56/72
+        // Type-Skala v1.0 (verbindlich): 12/14/16/20/32/40/72
         xs: "12px",
         sm: "14px",
         base: "16px",
         lg: "20px",
-        xl: "24px",
+        xl: "32px",
         "2xl": "32px",
         "3xl": "40px",
-        "4xl": "56px",
+        "4xl": "72px",
         "5xl": "72px",
       },
       spacing: {
@@ -49,9 +48,10 @@ const config: Config = {
         24: "96px",
       },
       borderRadius: {
-        sm: "8px",
-        md: "12px",
-        lg: "20px",
+        // Radius v1.0 (verbindlich): 0/4/8
+        sm: "4px",
+        md: "8px",
+        lg: "8px",
       },
     },
   },

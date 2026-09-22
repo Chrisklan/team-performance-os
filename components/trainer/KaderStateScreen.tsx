@@ -68,7 +68,7 @@ export function KaderStateScreen({ kind, detail, onRetry }: KaderStateScreenProp
         {kind === "UNAUTHENTICATED" ? (
           <Link
             href="/login?next=/dashboard"
-            className="flex h-12 items-center justify-center rounded-md bg-accent px-4 text-base font-bold text-surface transition-colors hover:bg-accent/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-ink focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
+            className="flex h-12 items-center justify-center rounded-md bg-signal px-4 text-base font-bold text-field transition-colors hover:bg-signal/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-ink focus-visible:ring-offset-2 focus-visible:ring-offset-field"
           >
             Zur Anmeldung
           </Link>
@@ -83,7 +83,7 @@ export function KaderStateScreen({ kind, detail, onRetry }: KaderStateScreenProp
             <button
               type="button"
               onClick={onRetry}
-              className="flex h-12 items-center justify-center rounded-md bg-accent px-4 text-base font-bold text-surface transition-colors hover:bg-accent/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-ink focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
+              className="flex h-12 items-center justify-center rounded-md bg-signal px-4 text-base font-bold text-field transition-colors hover:bg-signal/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-ink focus-visible:ring-offset-2 focus-visible:ring-offset-field"
             >
               Erneut laden
             </button>
@@ -91,7 +91,7 @@ export function KaderStateScreen({ kind, detail, onRetry }: KaderStateScreenProp
             // Voller Seitenabruf, damit der Server neu abfragt.
             <a
               href="/dashboard"
-              className="flex h-12 items-center justify-center rounded-md bg-accent px-4 text-base font-bold text-surface transition-colors hover:bg-accent/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-ink focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
+              className="flex h-12 items-center justify-center rounded-md bg-signal px-4 text-base font-bold text-field transition-colors hover:bg-signal/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-ink focus-visible:ring-offset-2 focus-visible:ring-offset-field"
             >
               Erneut laden
             </a>

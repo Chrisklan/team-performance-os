@@ -36,7 +36,8 @@ export function ReadinessPulsSparkline({
   const lastX = (series.length - 1) * stepX;
   const lastY = toY(lastValue);
   const avgY = toY(rollingAvg);
-  const strokeColor = lastValue < rollingAvg ? "var(--warn)" : "var(--ok)";
+  // needs_decision an Chris (AP-54): "ok" hat in v1.0 keinen Anker, Wert aus v0.5 unveraendert.
+  const strokeColor = lastValue < rollingAvg ? "var(--stop)" : "var(--legacy-ok)";
 
   return (
     <svg
