@@ -65,13 +65,15 @@ SELECT is((SELECT band::text FROM app.readiness_scores
 -- Trainer: FORBIDDEN
 SET ROLE authenticated;
 SELECT app._t_jwt13('d2000000-0000-0000-0000-000000000002', 'coach');
-SELECT throws_ok($$SELECT public.rpc_submit_checkin(current_date, 450, 8, 7, 6, 3, 8, 7, 8, NULL)$$,
-  '42501', 'FORBIDDEN: daily_checkins.submit', 'Trainer darf ueber die Tuer keinen Check-In abgeben');
+SELECT is((SELECT public.rpc_submit_checkin(current_date, 450, 8, 7, 6, 3, 8, 7, 8, NULL)),
+  jsonb_build_object('code', '42501', 'message', 'FORBIDDEN: daily_checkins.submit', 'details', NULL, 'hint', NULL),
+  'Trainer darf ueber die Tuer keinen Check-In abgeben');
 
 -- Gefaelschter player-Claim ohne passende Rolle in der DB: FORBIDDEN (Stufe 2)
 SELECT app._t_jwt13('d2000000-0000-0000-0000-000000000002', 'player');
-SELECT throws_ok($$SELECT public.rpc_submit_checkin(current_date, 450, 8, 7, 6, 3, 8, 7, 8, NULL)$$,
-  '42501', 'FORBIDDEN: daily_checkins.submit', 'Gefaelschter player-Claim: FORBIDDEN');
+SELECT is((SELECT public.rpc_submit_checkin(current_date, 450, 8, 7, 6, 3, 8, 7, 8, NULL)),
+  jsonb_build_object('code', '42501', 'message', 'FORBIDDEN: daily_checkins.submit', 'details', NULL, 'hint', NULL),
+  'Gefaelschter player-Claim: FORBIDDEN');
 
 -- Datumsfenster bleibt in der RPC
 SELECT app._t_jwt13('d2000000-0000-0000-0000-000000000003', 'player');

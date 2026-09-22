@@ -243,3 +243,10 @@ COMMENT ON FUNCTION app.rpc_submit_checkin(date, numeric, integer, integer, inte
 REVOKE EXECUTE ON FUNCTION app.rpc_submit_checkin(date, numeric, integer, integer, integer, integer, integer, integer, integer, jsonb) FROM PUBLIC;
 REVOKE EXECUTE ON FUNCTION app.rpc_submit_checkin(date, numeric, integer, integer, integer, integer, integer, integer, integer, jsonb) FROM anon;
 GRANT EXECUTE ON FUNCTION app.rpc_submit_checkin(date, numeric, integer, integer, integer, integer, integer, integer, integer, jsonb) TO authenticated;
+
+-- -----------------------------------------------------------------------------
+-- AP-45d (2026-09-21): die Ablehnung wurde von dem RAISE mit zurueckgerollt
+-- (Befund F1). Ab jetzt ist sie Antwort statt Ausnahme. Die Funktionen dieser Datei,
+-- die davon betroffen sind, werden in 20_denial_answer.sql zuletzt neu angelegt.
+-- Wer hier etwas am Waechter oder am Rueckgabetyp aendert, muss 20 nachziehen.
+-- -----------------------------------------------------------------------------

@@ -118,8 +118,9 @@ RESET ROLE;
 -- Ohne Claims gibt es keine eigene Person, also auch keine Praeferenz.
 SET ROLE authenticated;
 SELECT set_config('request.jwt.claims', '', true);
-SELECT throws_ok($$SELECT app.rpc_my_body_map_figure()$$,
-  '42501', 'FORBIDDEN: persons.body_map_figure', 'Ohne Claims FORBIDDEN');
+SELECT is((SELECT app.rpc_my_body_map_figure()),
+  jsonb_build_object('code', '42501', 'message', 'FORBIDDEN: persons.body_map_figure', 'details', NULL, 'hint', NULL),
+  'Ohne Claims FORBIDDEN');
 RESET ROLE;
 
 SELECT * FROM finish();

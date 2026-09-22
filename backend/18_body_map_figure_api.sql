@@ -52,3 +52,10 @@ REVOKE EXECUTE ON FUNCTION public.rpc_my_body_map_figure()          FROM anon;
 REVOKE EXECUTE ON FUNCTION public.rpc_set_my_body_map_figure(text)  FROM anon;
 GRANT  EXECUTE ON FUNCTION public.rpc_my_body_map_figure()          TO authenticated, service_role;
 GRANT  EXECUTE ON FUNCTION public.rpc_set_my_body_map_figure(text)  TO authenticated, service_role;
+
+-- -----------------------------------------------------------------------------
+-- AP-45d (2026-09-21): die Ablehnung wurde von dem RAISE mit zurueckgerollt
+-- (Befund F1). Ab jetzt ist sie Antwort statt Ausnahme. Die Funktionen dieser Datei,
+-- die davon betroffen sind, werden in 20_denial_answer.sql zuletzt neu angelegt.
+-- Wer hier etwas am Waechter oder am Rueckgabetyp aendert, muss 20 nachziehen.
+-- -----------------------------------------------------------------------------

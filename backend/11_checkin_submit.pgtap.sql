@@ -71,8 +71,9 @@ SELECT is(
   true, 'Trainer: rpc_morning_ops zeigt hasCheckIn = true');
 SELECT throws_ok($$SELECT body_map FROM app.daily_checkins LIMIT 1$$, '42501', NULL,
   'Trainer: body_map bleibt gesperrt');
-SELECT throws_ok($$SELECT app.rpc_submit_checkin(current_date, 480, 8, 8, 8, 2, 8, 8, 8, NULL)$$,
-  '42501', 'FORBIDDEN: daily_checkins.submit', 'Trainer darf keinen Check-In abgeben');
+SELECT is((SELECT app.rpc_submit_checkin(current_date, 480, 8, 8, 8, 2, 8, 8, 8, NULL)),
+  jsonb_build_object('code', '42501', 'message', 'FORBIDDEN: daily_checkins.submit', 'details', NULL, 'hint', NULL),
+  'Trainer darf keinen Check-In abgeben');
 
 -- Datum
 SELECT app._t_jwt('b2000000-0000-0000-0000-000000000003', 'player');
@@ -207,15 +208,17 @@ SELECT app._t_jwt('b2000000-0000-0000-0000-000000000003', 'player');
 
 -- Ohne Claims
 SELECT set_config('request.jwt.claims', '', true);
-SELECT throws_ok($$SELECT app.rpc_submit_checkin(current_date)$$,
-  '42501', 'FORBIDDEN: daily_checkins.submit', 'Ohne Claims FORBIDDEN');
+SELECT is((SELECT app.rpc_submit_checkin(current_date)),
+  jsonb_build_object('code', '42501', 'message', 'FORBIDDEN: daily_checkins.submit', 'details', NULL, 'hint', NULL),
+  'Ohne Claims FORBIDDEN');
 
 -- Nach Shredding sofort gesperrt
 SELECT app._t_jwt('b2000000-0000-0000-0000-000000000001', 'admin');
 SELECT app.rpc_shred_person('b1000000-0000-0000-0000-000000000003');
 SELECT app._t_jwt('b2000000-0000-0000-0000-000000000003', 'player');
-SELECT throws_ok($$SELECT app.rpc_submit_checkin(current_date)$$,
-  '42501', 'FORBIDDEN: daily_checkins.submit', 'Nach Shredding: Check-In sofort FORBIDDEN');
+SELECT is((SELECT app.rpc_submit_checkin(current_date)),
+  jsonb_build_object('code', '42501', 'message', 'FORBIDDEN: daily_checkins.submit', 'details', NULL, 'hint', NULL),
+  'Nach Shredding: Check-In sofort FORBIDDEN');
 RESET ROLE;
 
 SET ROLE anon;

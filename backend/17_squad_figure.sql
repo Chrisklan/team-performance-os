@@ -217,3 +217,10 @@ GRANT SELECT (id, team_id, auth_user_id, display_name, person_position, shirt_nu
               is_active, created_at, updated_at)
   ON app.persons TO authenticated;
 -- birth_date und body_map_figure sind NICHT in der Liste.
+
+-- -----------------------------------------------------------------------------
+-- AP-45d (2026-09-21): die Ablehnung wurde von dem RAISE mit zurueckgerollt
+-- (Befund F1). Ab jetzt ist sie Antwort statt Ausnahme. Die Funktionen dieser Datei,
+-- die davon betroffen sind, werden in 20_denial_answer.sql zuletzt neu angelegt.
+-- Wer hier etwas am Waechter oder am Rueckgabetyp aendert, muss 20 nachziehen.
+-- -----------------------------------------------------------------------------

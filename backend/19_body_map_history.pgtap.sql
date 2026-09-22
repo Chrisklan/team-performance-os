@@ -171,18 +171,26 @@ SELECT throws_ok($$SELECT public.rpc_my_body_map_history(0)$$,   '22023', 'INVAL
 SELECT throws_ok($$SELECT public.rpc_my_body_map_history(91)$$,  '22023', 'INVALID: body_map_history.days', 'Fenster 91 wird abgelehnt');
 SELECT throws_ok($$SELECT public.rpc_my_body_map_history(NULL)$$, '22023', 'INVALID: body_map_history.days', 'Fenster NULL wird abgelehnt');
 SELECT app._t_jwt19('f2000000-0000-0000-0000-000000000003', 'coach');
-SELECT throws_ok($$SELECT public.rpc_my_body_map_history()$$, '42501', 'FORBIDDEN: daily_checkins.body_map', 'Trainerin: eigener Verlauf abgewiesen');
+SELECT is((SELECT public.rpc_my_body_map_history()),
+  jsonb_build_object('code', '42501', 'message', 'FORBIDDEN: daily_checkins.body_map', 'details', NULL, 'hint', NULL),
+  'Trainerin: eigener Verlauf abgewiesen');
 SELECT app._t_jwt19('f2000000-0000-0000-0000-000000000004', 'physio');
-SELECT throws_ok($$SELECT public.rpc_my_body_map_history()$$, '42501', 'FORBIDDEN: daily_checkins.body_map', 'Physio: der Weg der Spielerin ist nicht seiner');
+SELECT is((SELECT public.rpc_my_body_map_history()),
+  jsonb_build_object('code', '42501', 'message', 'FORBIDDEN: daily_checkins.body_map', 'details', NULL, 'hint', NULL),
+  'Physio: der Weg der Spielerin ist nicht seiner');
 SELECT app._t_jwt19('f2000000-0000-0000-0000-000000000007', 'admin');
-SELECT throws_ok($$SELECT public.rpc_my_body_map_history()$$, '42501', 'FORBIDDEN: daily_checkins.body_map', 'Admin: abgewiesen');
+SELECT is((SELECT public.rpc_my_body_map_history()),
+  jsonb_build_object('code', '42501', 'message', 'FORBIDDEN: daily_checkins.body_map', 'details', NULL, 'hint', NULL),
+  'Admin: abgewiesen');
 RESET ROLE;
 SET ROLE anon;
 SELECT throws_ok($$SELECT public.rpc_my_body_map_history()$$, '42501', NULL, 'anon: abgewiesen');
 RESET ROLE;
 SET ROLE authenticated;
 SELECT set_config('request.jwt.claims', '', true);
-SELECT throws_ok($$SELECT public.rpc_my_body_map_history()$$, '42501', 'FORBIDDEN: daily_checkins.body_map', 'Ohne Claims FORBIDDEN');
+SELECT is((SELECT public.rpc_my_body_map_history()),
+  jsonb_build_object('code', '42501', 'message', 'FORBIDDEN: daily_checkins.body_map', 'details', NULL, 'hint', NULL),
+  'Ohne Claims FORBIDDEN');
 RESET ROLE;
 
 -- ---------------------------------------------------------------------------
@@ -268,29 +276,38 @@ SELECT set_config('tpos.log_before', (SELECT count(*)::text FROM app.access_log)
 
 SET ROLE authenticated;
 SELECT app._t_jwt19('f2000000-0000-0000-0000-000000000003', 'coach');
-SELECT throws_ok($$SELECT public.rpc_body_map_region_reports('f1000000-0000-0000-0000-000000000001')$$,
-  '42501', 'FORBIDDEN: daily_checkins.body_map', 'Trainerin: Physio Sicht abgewiesen (Medizin Gate)');
+SELECT is((SELECT public.rpc_body_map_region_reports('f1000000-0000-0000-0000-000000000001')),
+  jsonb_build_object('code', '42501', 'message', 'FORBIDDEN: daily_checkins.body_map', 'details', NULL, 'hint', NULL),
+  'Trainerin: Physio Sicht abgewiesen (Medizin Gate)');
 SELECT app._t_jwt19('f2000000-0000-0000-0000-000000000006', 'athletic_coach');
-SELECT throws_ok($$SELECT public.rpc_body_map_region_reports('f1000000-0000-0000-0000-000000000001')$$,
-  '42501', 'FORBIDDEN: daily_checkins.body_map', 'Athletiktrainerin: abgewiesen');
+SELECT is((SELECT public.rpc_body_map_region_reports('f1000000-0000-0000-0000-000000000001')),
+  jsonb_build_object('code', '42501', 'message', 'FORBIDDEN: daily_checkins.body_map', 'details', NULL, 'hint', NULL),
+  'Athletiktrainerin: abgewiesen');
 SELECT app._t_jwt19('f2000000-0000-0000-0000-000000000007', 'admin');
-SELECT throws_ok($$SELECT public.rpc_body_map_region_reports('f1000000-0000-0000-0000-000000000001')$$,
-  '42501', 'FORBIDDEN: daily_checkins.body_map', 'Admin: abgewiesen, Admin ist kein Medizin Leser');
+SELECT is((SELECT public.rpc_body_map_region_reports('f1000000-0000-0000-0000-000000000001')),
+  jsonb_build_object('code', '42501', 'message', 'FORBIDDEN: daily_checkins.body_map', 'details', NULL, 'hint', NULL),
+  'Admin: abgewiesen, Admin ist kein Medizin Leser');
 SELECT app._t_jwt19('f2000000-0000-0000-0000-000000000001', 'player');
-SELECT throws_ok($$SELECT public.rpc_body_map_region_reports('f1000000-0000-0000-0000-000000000001')$$,
-  '42501', 'FORBIDDEN: daily_checkins.body_map', 'Spielerin: auch fuer die eigene Id abgewiesen, ihr Weg ist der Verlauf');
+SELECT is((SELECT public.rpc_body_map_region_reports('f1000000-0000-0000-0000-000000000001')),
+  jsonb_build_object('code', '42501', 'message', 'FORBIDDEN: daily_checkins.body_map', 'details', NULL, 'hint', NULL),
+  'Spielerin: auch fuer die eigene Id abgewiesen, ihr Weg ist der Verlauf');
 SELECT app._t_jwt19('f2000000-0000-0000-0000-000000000008', 'physio', '19191919-1919-1919-1919-191919190000');
-SELECT throws_ok($$SELECT public.rpc_body_map_region_reports('f1000000-0000-0000-0000-000000000001')$$,
-  '42501', 'FORBIDDEN: daily_checkins.body_map', 'Physio aus dem anderen Kader: Spielerin A abgewiesen');
+SELECT is((SELECT public.rpc_body_map_region_reports('f1000000-0000-0000-0000-000000000001')),
+  jsonb_build_object('code', '42501', 'message', 'FORBIDDEN: daily_checkins.body_map', 'details', NULL, 'hint', NULL),
+  'Physio aus dem anderen Kader: Spielerin A abgewiesen');
 SELECT app._t_jwt19('f2000000-0000-0000-0000-000000000004', 'physio');
-SELECT throws_ok($$SELECT public.rpc_body_map_region_reports('f1000000-0000-0000-0000-000000000009')$$,
-  '42501', 'FORBIDDEN: daily_checkins.body_map', 'Physio: Spielerin aus dem anderen Kader abgewiesen');
-SELECT throws_ok($$SELECT public.rpc_body_map_region_reports('f1000000-0000-0000-0000-00000000dead')$$,
-  '42501', 'FORBIDDEN: daily_checkins.body_map', 'Physio: unbekannte Id gibt dieselbe Antwort, kein Orakel');
-SELECT throws_ok($$SELECT public.rpc_body_map_region_reports(NULL)$$,
-  '42501', 'FORBIDDEN: daily_checkins.body_map', 'Physio: NULL abgewiesen');
-SELECT throws_ok($$SELECT public.rpc_body_map_region_reports('f1000000-0000-0000-0000-000000000003')$$,
-  '42501', 'FORBIDDEN: daily_checkins.body_map', 'Physio: eine Person ohne Rolle player (die Trainerin) abgewiesen');
+SELECT is((SELECT public.rpc_body_map_region_reports('f1000000-0000-0000-0000-000000000009')),
+  jsonb_build_object('code', '42501', 'message', 'FORBIDDEN: daily_checkins.body_map', 'details', NULL, 'hint', NULL),
+  'Physio: Spielerin aus dem anderen Kader abgewiesen');
+SELECT is((SELECT public.rpc_body_map_region_reports('f1000000-0000-0000-0000-00000000dead')),
+  jsonb_build_object('code', '42501', 'message', 'FORBIDDEN: daily_checkins.body_map', 'details', NULL, 'hint', NULL),
+  'Physio: unbekannte Id gibt dieselbe Antwort, kein Orakel');
+SELECT is((SELECT public.rpc_body_map_region_reports(NULL)),
+  jsonb_build_object('code', '42501', 'message', 'FORBIDDEN: daily_checkins.body_map', 'details', NULL, 'hint', NULL),
+  'Physio: NULL abgewiesen');
+SELECT is((SELECT public.rpc_body_map_region_reports('f1000000-0000-0000-0000-000000000003')),
+  jsonb_build_object('code', '42501', 'message', 'FORBIDDEN: daily_checkins.body_map', 'details', NULL, 'hint', NULL),
+  'Physio: eine Person ohne Rolle player (die Trainerin) abgewiesen');
 RESET ROLE;
 
 SET ROLE anon;
@@ -299,8 +316,9 @@ SELECT throws_ok($$SELECT public.rpc_body_map_region_reports('f1000000-0000-0000
 RESET ROLE;
 SET ROLE authenticated;
 SELECT set_config('request.jwt.claims', '', true);
-SELECT throws_ok($$SELECT public.rpc_body_map_region_reports('f1000000-0000-0000-0000-000000000001')$$,
-  '42501', 'FORBIDDEN: daily_checkins.body_map', 'Ohne Claims FORBIDDEN');
+SELECT is((SELECT public.rpc_body_map_region_reports('f1000000-0000-0000-0000-000000000001')),
+  jsonb_build_object('code', '42501', 'message', 'FORBIDDEN: daily_checkins.body_map', 'details', NULL, 'hint', NULL),
+  'Ohne Claims FORBIDDEN');
 RESET ROLE;
 
 SELECT is((SELECT count(*)::text FROM app.access_log), current_setting('tpos.log_before'),
@@ -349,8 +367,9 @@ SELECT is((SELECT count(*)::int FROM app.access_log WHERE subject_id = 'f1000000
 
 SET ROLE authenticated;
 SELECT app._t_jwt19('f2000000-0000-0000-0000-000000000004', 'physio');
-SELECT throws_ok($$SELECT public.rpc_body_map_region_reports('f1000000-0000-0000-0000-000000000010')$$,
-  '42501', 'FORBIDDEN: daily_checkins.body_map', 'Physio: geshredderte Spielerin abgewiesen, obwohl ihre Rolle player weiter gilt');
+SELECT is((SELECT public.rpc_body_map_region_reports('f1000000-0000-0000-0000-000000000010')),
+  jsonb_build_object('code', '42501', 'message', 'FORBIDDEN: daily_checkins.body_map', 'details', NULL, 'hint', NULL),
+  'Physio: geshredderte Spielerin abgewiesen, obwohl ihre Rolle player weiter gilt');
 RESET ROLE;
 SELECT is((SELECT count(*)::int FROM app.access_log WHERE subject_id = 'f1000000-0000-0000-0000-000000000010'), 0,
   'Nach dem Shred entsteht keine neue Zeile ueber die geshredderte Person');
@@ -359,15 +378,17 @@ SELECT is((SELECT count(*)::int FROM app.access_log WHERE subject_id = 'f1000000
 UPDATE app.persons SET is_active = false WHERE id = 'f1000000-0000-0000-0000-000000000002';
 SET ROLE authenticated;
 SELECT app._t_jwt19('f2000000-0000-0000-0000-000000000004', 'physio');
-SELECT throws_ok($$SELECT public.rpc_body_map_region_reports('f1000000-0000-0000-0000-000000000002')$$,
-  '42501', 'FORBIDDEN: daily_checkins.body_map', 'Physio: deaktivierte Spielerin abgewiesen');
+SELECT is((SELECT public.rpc_body_map_region_reports('f1000000-0000-0000-0000-000000000002')),
+  jsonb_build_object('code', '42501', 'message', 'FORBIDDEN: daily_checkins.body_map', 'details', NULL, 'hint', NULL),
+  'Physio: deaktivierte Spielerin abgewiesen');
 RESET ROLE;
 
 -- Der Claim allein reicht nicht: die Datenbank bestaetigt ihn bei jedem Aufruf.
 SET ROLE authenticated;
 SELECT app._t_jwt19('f2000000-0000-0000-0000-000000000003', 'physio');
-SELECT throws_ok($$SELECT public.rpc_body_map_region_reports('f1000000-0000-0000-0000-000000000001')$$,
-  '42501', 'FORBIDDEN: daily_checkins.body_map', 'Token sagt physio, die Datenbank sagt coach: abgewiesen');
+SELECT is((SELECT public.rpc_body_map_region_reports('f1000000-0000-0000-0000-000000000001')),
+  jsonb_build_object('code', '42501', 'message', 'FORBIDDEN: daily_checkins.body_map', 'details', NULL, 'hint', NULL),
+  'Token sagt physio, die Datenbank sagt coach: abgewiesen');
 RESET ROLE;
 
 -- Personalunion: eine Person hat keine zweite Rolle neben der aktiven (ADR-009 Punkt 4).
@@ -379,8 +400,9 @@ SELECT throws_ok($$INSERT INTO app.role_assignments (team_id, person_id, role, v
 UPDATE app.persons SET is_active = false WHERE id = 'f1000000-0000-0000-0000-000000000004';
 SET ROLE authenticated;
 SELECT app._t_jwt19('f2000000-0000-0000-0000-000000000004', 'physio');
-SELECT throws_ok($$SELECT public.rpc_body_map_region_reports('f1000000-0000-0000-0000-000000000001')$$,
-  '42501', 'FORBIDDEN: daily_checkins.body_map', 'Physio deaktiviert: der noch gueltige Token oeffnet nichts');
+SELECT is((SELECT public.rpc_body_map_region_reports('f1000000-0000-0000-0000-000000000001')),
+  jsonb_build_object('code', '42501', 'message', 'FORBIDDEN: daily_checkins.body_map', 'details', NULL, 'hint', NULL),
+  'Physio deaktiviert: der noch gueltige Token oeffnet nichts');
 RESET ROLE;
 UPDATE app.persons SET is_active = true WHERE id = 'f1000000-0000-0000-0000-000000000004';
 
@@ -388,8 +410,9 @@ UPDATE app.role_assignments SET valid_to = now() - interval '1 second'
  WHERE person_id = 'f1000000-0000-0000-0000-000000000004';
 SET ROLE authenticated;
 SELECT app._t_jwt19('f2000000-0000-0000-0000-000000000004', 'physio');
-SELECT throws_ok($$SELECT public.rpc_body_map_region_reports('f1000000-0000-0000-0000-000000000001')$$,
-  '42501', 'FORBIDDEN: daily_checkins.body_map', 'Rolle physio beendet: der noch gueltige Token oeffnet nichts');
+SELECT is((SELECT public.rpc_body_map_region_reports('f1000000-0000-0000-0000-000000000001')),
+  jsonb_build_object('code', '42501', 'message', 'FORBIDDEN: daily_checkins.body_map', 'details', NULL, 'hint', NULL),
+  'Rolle physio beendet: der noch gueltige Token oeffnet nichts');
 RESET ROLE;
 UPDATE app.role_assignments SET valid_to = NULL
  WHERE person_id = 'f1000000-0000-0000-0000-000000000004';
@@ -421,8 +444,9 @@ SELECT ok((SELECT display_name LIKE 'SCRAPED-%' FROM app.persons WHERE id = 'f10
   'Die Zeile der Medizinperson ist anonymisiert, die id bleibt der Verweis');
 SET ROLE authenticated;
 SELECT app._t_jwt19('f2000000-0000-0000-0000-000000000004', 'physio');
-SELECT throws_ok($$SELECT public.rpc_body_map_region_reports('f1000000-0000-0000-0000-000000000001')$$,
-  '42501', 'FORBIDDEN: daily_checkins.body_map', 'Geshredderte Medizinperson: der Token oeffnet nichts mehr');
+SELECT is((SELECT public.rpc_body_map_region_reports('f1000000-0000-0000-0000-000000000001')),
+  jsonb_build_object('code', '42501', 'message', 'FORBIDDEN: daily_checkins.body_map', 'details', NULL, 'hint', NULL),
+  'Geshredderte Medizinperson: der Token oeffnet nichts mehr');
 RESET ROLE;
 
 SELECT * FROM finish();
