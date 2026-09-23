@@ -65,7 +65,7 @@ $$;
 
 SELECT app._test_set_jwt('{"sub":"22222222-2222-2222-2222-222222222222","role":"authenticated","app_role":"admin","team_id":"11111111-1111-1111-1111-111111111111"}');
 SELECT lives_ok($$SELECT * FROM app.rpc_get_my_roles()$$, 'rpc_get_my_roles als Admin');
-SELECT lives_ok($$SELECT * FROM app.rpc_list_team_members()$$, 'rpc_list_team_members als Admin');
+SELECT ok(NOT app.is_denial(app.rpc_list_team_members()), 'rpc_list_team_members als Admin');
 SELECT lives_ok($$SELECT * FROM app.rpc_admin_denials('2026-09-01', '2026-09-30')$$, 'rpc_admin_denials als Admin');
 SELECT lives_ok($$SELECT * FROM app.rpc_shred_person('66666666-6666-6666-6666-666666666666')$$, 'rpc_shred_person als Admin');
 SELECT lives_ok($$SELECT * FROM app.rpc_export_my_data()$$, 'rpc_export_my_data als Admin');
@@ -101,7 +101,7 @@ ON CONFLICT DO NOTHING;
 
 SELECT app._test_set_jwt('{"sub":"33333333-3333-3333-3333-333333333333","role":"authenticated","app_role":"coach","team_id":"11111111-1111-1111-1111-111111111111"}');
 SELECT lives_ok($$SELECT * FROM app.rpc_get_my_roles()$$, 'rpc_get_my_roles als Coach');
-SELECT lives_ok($$SELECT * FROM app.rpc_list_team_members()$$, 'rpc_list_team_members als Coach');
+SELECT ok(NOT app.is_denial(app.rpc_list_team_members()), 'rpc_list_team_members als Coach');
 SELECT ok(NOT app.is_denial(app.rpc_get_clearance('66666666-6666-6666-6666-666666666666')),
   'rpc_get_clearance als Coach');
 
@@ -111,7 +111,7 @@ SELECT ok(NOT app.is_denial(app.rpc_get_clearance('66666666-6666-6666-6666-66666
 
 SELECT app._test_set_jwt('{"sub":"44444444-4444-4444-4444-444444444444","role":"authenticated","app_role":"physio","team_id":"11111111-1111-1111-1111-111111111111"}');
 SELECT lives_ok($$SELECT * FROM app.rpc_get_my_roles()$$, 'rpc_get_my_roles als Physio');
-SELECT lives_ok($$SELECT * FROM app.rpc_list_team_members()$$, 'rpc_list_team_members als Physio');
+SELECT ok(NOT app.is_denial(app.rpc_list_team_members()), 'rpc_list_team_members als Physio');
 SELECT ok(NOT app.is_denial(app.rpc_check_ins_medical('66666666-6666-6666-6666-666666666666', '2026-09-01', '2026-09-30')),
   'rpc_check_ins_medical als Physio');
 SELECT ok(NOT app.is_denial(app.rpc_readiness_full('66666666-6666-6666-6666-666666666666', '2026-09-01', '2026-09-30')),
@@ -129,7 +129,7 @@ SELECT ok(NOT app.is_denial(app.rpc_release_deviation('aaaaaaaa-aaaa-aaaa-aaaa-a
 
 SELECT app._test_set_jwt('{"sub":"55555555-5555-5555-5555-555555555555","role":"authenticated","app_role":"doctor","team_id":"11111111-1111-1111-1111-111111111111"}');
 SELECT lives_ok($$SELECT * FROM app.rpc_get_my_roles()$$, 'rpc_get_my_roles als Doctor');
-SELECT lives_ok($$SELECT * FROM app.rpc_list_team_members()$$, 'rpc_list_team_members als Doctor');
+SELECT ok(NOT app.is_denial(app.rpc_list_team_members()), 'rpc_list_team_members als Doctor');
 SELECT ok(NOT app.is_denial(app.rpc_check_ins_medical('66666666-6666-6666-6666-666666666666', '2026-09-01', '2026-09-30')),
   'rpc_check_ins_medical als Doctor');
 SELECT ok(NOT app.is_denial(app.rpc_readiness_full('66666666-6666-6666-6666-666666666666', '2026-09-01', '2026-09-30')),
@@ -181,7 +181,7 @@ SELECT ok(app._test_denied(app.rpc_set_clearance('66666666-6666-6666-6666-666666
 
 -- Player darf Liste nicht sehen
 SELECT app._test_set_jwt('{"sub":"66666666-6666-6666-6666-666666666666","role":"authenticated","app_role":"player","team_id":"11111111-1111-1111-1111-111111111111"}');
-SELECT throws_ok($$SELECT * FROM app.rpc_list_team_members()$$, '42501', 'FORBIDDEN: persons.list', 'rpc_list_team_members blockt Player');
+SELECT ok(app._test_denied(app.rpc_list_team_members(), 'FORBIDDEN: persons.list'), 'rpc_list_team_members blockt Player (Muster D, Punkt 33)');
 
 -- Player darf nicht freigeben
 SELECT app._test_set_jwt('{"sub":"66666666-6666-6666-6666-666666666666","role":"authenticated","app_role":"player","team_id":"11111111-1111-1111-1111-111111111111"}');

@@ -231,7 +231,9 @@ SELECT is(app.rpc_shred_person('a1000000-0000-0000-0000-000000000002'),
 SELECT app._t_jwt('a2000000-0000-0000-0000-000000000002', 'coach');
 SELECT is(app.auth_is_staff(), false, 'Nach Shredding: auth_is_staff() = false mit altem Claim');
 SELECT throws_ok($$SELECT app.rpc_morning_ops()$$, '42501', 'FORBIDDEN', 'Nach Shredding: rpc_morning_ops wirft sofort FORBIDDEN');
-SELECT throws_ok($$SELECT app.rpc_list_team_members()$$, '42501', 'FORBIDDEN: persons.list',
+-- Seit Punkt 33 (2026-09-23) Muster D: die Ablehnung ist eine Antwort, kein RAISE.
+SELECT ok(app.is_denial(app.rpc_list_team_members())
+          AND app.rpc_list_team_members()->>'message' = 'FORBIDDEN: persons.list',
   'Nach Shredding: Ablehnung ohne Team gibt FORBIDDEN, nicht 23502');
 
 RESET ROLE;

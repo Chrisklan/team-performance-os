@@ -2,13 +2,17 @@
 -- 26_app_execute_revoke.pgtap.sql — die acht Funktionen ohne Tuer sind fuer
 -- authenticated zu (Punkt 55, Befund N5)
 -- Voraussetzung: 09_rpcs.sql, 14_shred_person.sql, 20_denial_answer.sql,
--- 26_app_execute_revoke.sql.
+-- 26_app_execute_revoke.sql, 31_medical_doors.sql, 32_team_members_door.sql.
 -- Laeuft in einer Transaktion und rollt zurueck, tpos_gate_test bleibt leer.
 --
 -- Die Suite prueft Rechte, keine Rumpfe. Sie faengt den Tag, an dem jemand eine
 -- der acht mit GRANT EXECUTE ... TO authenticated wieder oeffnet, ohne ihr eine
 -- Tuer zu bauen. Baut AP-47a eine Tuer, gehoert der betreffende Name aus der
 -- Liste hier heraus und in die Positivkontrolle darunter.
+--
+-- Stand 2026-09-23: sieben der acht haben eine Tuer (sechs aus AP-47a,
+-- rpc_list_team_members aus dem Web Vorlauf, 32_team_members_door.sql). Zu ist nur
+-- noch rpc_shred_person, und die bekommt keine.
 --
 -- Die Positivkontrolle ist der wichtigere Teil: ein "acht mal false" allein
 -- bewiese nur, dass der Aufbau nicht traegt. Die sechs Funktionen MIT Tuer
@@ -21,10 +25,13 @@ SET search_path = public, pgtap;
 SELECT plan(19);
 
 -- ---------------------------------------------------------------------------
--- 1. Die zwei ohne Tuer sind zu, die sechs mit Tuer haben ihr Recht zurueck (8)
+-- 1. Von den acht ist nur noch eine ohne Tuer und zu: rpc_shred_person.
+--    Die sieben mit Tuer haben ihr Recht zurueck (8)
+--    AP-47a gab sechs ihre Tuer, der Web Vorlauf zur Physio Sicht (Bridge Punkt 33,
+--    2026-09-23) die siebte, rpc_list_team_members. Aus zwei wurde eins.
 -- ---------------------------------------------------------------------------
-SELECT ok(NOT has_function_privilege('authenticated', 'app.rpc_list_team_members()', 'EXECUTE'),
-  'rpc_list_team_members: kein EXECUTE fuer authenticated');
+SELECT ok(has_function_privilege('authenticated', 'app.rpc_list_team_members()', 'EXECUTE'),
+  'Punkt 33: rpc_list_team_members hat eine Tuer und deshalb sein EXECUTE zurueck (Punkt 55)');
 SELECT ok(has_function_privilege('authenticated', 'app.rpc_check_ins_medical(uuid, date, date)', 'EXECUTE'),
   'AP-47a: rpc_check_ins_medical hat eine Tuer und deshalb sein EXECUTE zurueck (Punkt 55)');
 SELECT ok(has_function_privilege('authenticated', 'app.rpc_readiness_full(uuid, date, date)', 'EXECUTE'),

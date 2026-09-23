@@ -174,7 +174,7 @@ SELECT isnt(public.rpc_get_clearance('b1000000-0000-0000-0000-000000000001')->'c
 INSERT INTO app.medical_clearances (team_id, person_id, status, load_note, valid_from, set_by, set_by_role) VALUES
   ('a1000000-0000-0000-0000-000000000001','b1000000-0000-0000-0000-000000000001','individual','zweite gueltige Zeile', current_date,'d2000000-0000-0000-0000-000000000002','doctor');
 SELECT app._t31_jwt('c1000000-0000-0000-0000-000000000001','coach');
-SELECT is((SELECT count(*) FROM app.rpc_list_team_members() WHERE id = 'b1000000-0000-0000-0000-000000000001'), 1::bigint,
+SELECT is((SELECT count(*) FROM jsonb_array_elements(app.rpc_list_team_members()->'members') m WHERE m->>'id' = 'b1000000-0000-0000-0000-000000000001'), 1::bigint,
   'A4: zwei gleichzeitig gueltige Freigaben ergeben trotzdem genau EINE Kaderzeile');
 
 -- -----------------------------------------------------------------------------
