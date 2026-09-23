@@ -22,6 +22,10 @@ const COPY: Record<KaderStateKind, Copy> = {
     title: "Kein Zugriff",
     body: "Mit diesem Konto ist der Kader nicht sichtbar. Er steht nur dem Trainerteam zur Verfügung. Melde dich mit einem Trainerkonto an.",
   },
+  NOT_FOUND: {
+    title: "Kader nicht gefunden",
+    body: "Zu deinem Konto gibt es keinen Kader. Das ist kein Serverfehler. Prüfe, ob du im richtigen Team angemeldet bist.",
+  },
   NETWORK: {
     title: "Server nicht erreichbar",
     body: "Der Kader konnte nicht geladen werden, weil keine Verbindung zum Server besteht. Prüfe deine Verbindung und lade die Seite erneut.",
@@ -98,7 +102,11 @@ export function KaderStateScreen({ kind, detail, onRetry }: KaderStateScreenProp
           )
         ) : null}
 
-        {kind !== "UNAUTHENTICATED" && kind !== "FORBIDDEN" ? <SignOutButton /> : null}
+        {kind === "NOT_FOUND" ? (
+          <SignOutButton label="Mit anderem Konto anmelden" variant="primary" />
+        ) : null}
+
+        {kind !== "UNAUTHENTICATED" && kind !== "FORBIDDEN" && kind !== "NOT_FOUND" ? <SignOutButton /> : null}
       </div>
     </main>
   );

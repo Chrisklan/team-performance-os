@@ -15,6 +15,7 @@ export class KaderAccessError extends Error {
 export type KaderErrorCode =
   | "UNAUTHENTICATED"
   | "FORBIDDEN"
+  | "NOT_FOUND"
   | "NETWORK"
   | "RPC_FAILED";
 
@@ -24,6 +25,9 @@ type RpcErrorLike = { code?: string | null; message?: string | null };
 //  * status 0 (Fetch gescheitert)      -> NETWORK
 //  * 42501 (FORBIDDEN, permission)     -> FORBIDDEN
 //  * PGRST301 / PGRST303 (JWT ungueltig, abgelaufen) -> UNAUTHENTICATED
+//  * P0002 oder HTTP 404 (nicht gefunden)  -> NOT_FOUND. Seit Punkt 64 antworten die
+//    Tueren darauf mit 404 statt 500; die Oberflaeche zeigt "gibt es nicht" statt
+//    "Server kaputt".
 //  * alles andere                       -> RPC_FAILED mit Code als Detail
 export function classifyRpcError(
   error: RpcErrorLike,
@@ -37,6 +41,9 @@ export function classifyRpcError(
   }
   if (error.code === "PGRST301" || error.code === "PGRST303") {
     return new KaderAccessError("Sitzung ungültig.", "UNAUTHENTICATED", error.code);
+  }
+  if (error.code === "P0002" || status === 404) {
+    return new KaderAccessError("Nicht gefunden.", "NOT_FOUND", error.code || "404");
   }
   return new KaderAccessError(
     `Kader konnte nicht geladen werden (${error.code || "unbekannt"}).`,

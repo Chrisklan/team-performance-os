@@ -13,8 +13,16 @@ import {
 } from "@/lib/trainer/api";
 import type { CoachKaderPayload } from "@/lib/trainer/types";
 import { attentionSort } from "@/lib/trainer/sort";
+import { redirect } from "next/navigation";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { appRoleFromClaims, isMedicalRole } from "@/lib/medical/role";
 
 export default async function TrainerDashboardPage() {
+  // Physio und Arzt haben ihre eigene Sicht (Bridge Punkt 33, Medizin Gate ADR-009:
+  // getrennte Sichten). Der Default nach der Anmeldung ist /dashboard, deshalb hier.
+  const { data: claimData } = await createSupabaseServerClient().auth.getClaims();
+  if (isMedicalRole(appRoleFromClaims(claimData?.claims))) redirect("/medizin");
+
   let payload: CoachKaderPayload;
   try {
     payload = await fetchKaderForCoach();

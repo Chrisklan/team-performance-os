@@ -8,12 +8,16 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { supabaseEnv } from "./env";
+import { appRoleFromClaims, homePathForRole } from "@/lib/medical/role";
 
-// Routen der Gruppe app/(trainer). Neue Trainer-Seiten hier eintragen.
+// Routen, die eine Anmeldung brauchen: app/(trainer) und app/(medizin).
+// Neue geschuetzte Seiten hier eintragen. Die Rolle prueft die Seite selbst.
 export const TRAINER_ROUTES = ["/dashboard"] as const;
+export const MEDICAL_ROUTES = ["/medizin"] as const;
+const PROTECTED_ROUTES = [...TRAINER_ROUTES, ...MEDICAL_ROUTES];
 
-function isTrainerRoute(pathname: string): boolean {
-  return TRAINER_ROUTES.some(
+function isProtectedRoute(pathname: string): boolean {
+  return PROTECTED_ROUTES.some(
     (route) => pathname === route || pathname.startsWith(`${route}/`),
   );
 }
@@ -51,13 +55,16 @@ export async function updateSession(request: NextRequest) {
   const authServerUnreachable = userError?.name === "AuthRetryableFetchError";
 
   if (user && request.nextUrl.pathname === "/login") {
+    // Startseite je Rolle: Physio und Arzt in die Medizinsicht. Die Rolle hier
+    // entscheidet nur die Weiterleitung, jede Seite prueft sie selbst noch einmal.
+    const { data } = await supabase.auth.getClaims();
     const dashboardUrl = request.nextUrl.clone();
-    dashboardUrl.pathname = "/dashboard";
+    dashboardUrl.pathname = homePathForRole(appRoleFromClaims(data?.claims));
     dashboardUrl.search = "";
     return NextResponse.redirect(dashboardUrl);
   }
 
-  if (!user && !authServerUnreachable && isTrainerRoute(request.nextUrl.pathname)) {
+  if (!user && !authServerUnreachable && isProtectedRoute(request.nextUrl.pathname)) {
     const loginUrl = request.nextUrl.clone();
     loginUrl.pathname = "/login";
     loginUrl.search = "";

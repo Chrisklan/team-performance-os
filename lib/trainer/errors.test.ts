@@ -12,6 +12,17 @@ describe("classifyRpcError", () => {
     expect(classifyRpcError({ code: "PGRST301" }, 401).code).toBe("UNAUTHENTICATED");
     expect(classifyRpcError({ code: "PGRST303" }, 401).code).toBe("UNAUTHENTICATED");
   });
+  it("P0002 ist NOT_FOUND, nicht RPC_FAILED (Punkt 64)", () => {
+    const e = classifyRpcError({ code: "P0002" }, 404);
+    expect(e.code).toBe("NOT_FOUND");
+    expect(e.detail).toBe("P0002");
+  });
+  it("HTTP 404 ohne Code ist NOT_FOUND", () => {
+    expect(classifyRpcError({ code: null }, 404).code).toBe("NOT_FOUND");
+  });
+  it("P0002 ueber den alten Weg (HTTP 500) ist trotzdem NOT_FOUND", () => {
+    expect(classifyRpcError({ code: "P0002" }, 500).code).toBe("NOT_FOUND");
+  });
   it("alles andere ist RPC_FAILED mit Code als Detail", () => {
     const e = classifyRpcError({ code: "XX000" }, 500);
     expect(e.code).toBe("RPC_FAILED");
