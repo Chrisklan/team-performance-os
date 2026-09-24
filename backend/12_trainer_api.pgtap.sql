@@ -40,7 +40,9 @@ SELECT ok(has_function_privilege('authenticated', 'public.rpc_trainer_morning_op
 SET ROLE authenticated;
 SELECT app._t_jwt12('c2000000-0000-0000-0000-000000000002', 'coach');
 SELECT is((public.rpc_trainer_morning_ops() ->> 'kaderName'), 'Wrapper Team', 'Trainer: Kadername aus seinem Team');
-SELECT is(jsonb_array_length(public.rpc_trainer_morning_ops() -> 'members'), 2, 'Trainer: 2 Mitglieder');
+-- Bridge Punkt 67 (2026-09-24): nur die Spielerin zaehlt, der Coach dieses
+-- Fixtures traegt keine Rolle player.
+SELECT is(jsonb_array_length(public.rpc_trainer_morning_ops() -> 'members'), 1, 'Trainer: 1 Mitglied (nur die Spielerin, Punkt 67)');
 SELECT is(public.rpc_trainer_morning_ops(), app.rpc_morning_ops(), 'Tuer liefert dasselbe Payload wie app.rpc_morning_ops');
 
 -- Spieler: FORBIDDEN

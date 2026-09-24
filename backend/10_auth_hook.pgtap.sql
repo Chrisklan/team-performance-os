@@ -179,7 +179,10 @@ SET ROLE authenticated;
 -- Trainer mit gueltigen Claims: Kader kommt
 SELECT app._t_jwt('a2000000-0000-0000-0000-000000000002', 'coach');
 SELECT is(app.rpc_morning_ops() ->> 'kaderName', 'Hook Team', 'Trainer: rpc_morning_ops liefert den Kader');
-SELECT is(jsonb_array_length(app.rpc_morning_ops() -> 'members'), 7, 'Trainer: rpc_morning_ops liefert alle 7 aktiven Personen');
+-- Bridge Punkt 67 (2026-09-24): rpc_morning_ops filtert seither auf die Rolle
+-- player, von den sieben aktiven Personen dieses Fixtures traegt nur eine
+-- (a1...003) eine gueltige player-Rolle.
+SELECT is(jsonb_array_length(app.rpc_morning_ops() -> 'members'), 1, 'Trainer: rpc_morning_ops liefert nur die aktive Spielerin (Punkt 67)');
 
 -- Spieler: FORBIDDEN
 SELECT app._t_jwt('a2000000-0000-0000-0000-000000000003', 'player');

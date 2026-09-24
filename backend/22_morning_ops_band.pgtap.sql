@@ -8,13 +8,17 @@
 -- Abschnitt 5). Bis zum 2026-09-22 standen beide im Payload, live erreichbar
 -- ueber den einzigen RPC, den der Web Client ruft.
 --
--- Die Suite prueft drei Dinge, nicht nur eines:
+-- Die Suite prueft vier Dinge, nicht nur eines:
 --   1. Trainer bekommt band, und weder value noch factors (auch nicht als
 --      null-Schluessel, und auch nicht bei fehlender Readiness-Zeile).
 --   2. Medizin und self sind unveraendert: app.rpc_readiness_full liefert
 --      physio, doctor und der eigenen Person weiter score_total UND factors.
 --   3. Der Waechter und die Spaltenrechte sind unveraendert: die zweite
 --      Schutzschicht auf app.readiness_scores haelt weiter dagegen.
+--   4. Bridge Punkt 67 (2026-09-24): der Kader-Payload traegt nur noch aktive
+--      Personen mit gueltiger Rolle player. Physio, Arzt (doctor) und Admin
+--      stehen nicht mehr im members-Array, dieselbe Bedingung wie bei
+--      app.rpc_list_team_members (Punkt 66).
 --
 -- Voraussetzung: 08_reconciling.sql, 09_rpcs.sql, 08_dashboard_migration.sql,
 -- 10_auth_hook.sql, 12_trainer_api.sql.
@@ -23,7 +27,7 @@
 
 BEGIN;
 SET search_path = public, pgtap;
-SELECT plan(36);
+SELECT plan(45);
 
 
 -- ---------------------------------------------------------------------------
@@ -43,14 +47,18 @@ INSERT INTO app.persons (id, team_id, display_name, auth_user_id, shirt_number, 
   ('d1000000-0000-0000-0000-000000000002', '22222222-2222-2222-2222-222222222222', 'Athletik',   'd2000000-0000-0000-0000-000000000002', NULL, 'Athletik'),
   ('d1000000-0000-0000-0000-000000000003', '22222222-2222-2222-2222-222222222222', 'Physio',     'd2000000-0000-0000-0000-000000000003', NULL, 'Physio'),
   ('d1000000-0000-0000-0000-000000000004', '22222222-2222-2222-2222-222222222222', 'Spielerin',  'd2000000-0000-0000-0000-000000000004', 7,    'Rueckraum'),
-  ('d1000000-0000-0000-0000-000000000005', '22222222-2222-2222-2222-222222222222', 'Ohne Score', 'd2000000-0000-0000-0000-000000000005', 9,    'Kreis');
+  ('d1000000-0000-0000-0000-000000000005', '22222222-2222-2222-2222-222222222222', 'Ohne Score', 'd2000000-0000-0000-0000-000000000005', 9,    'Kreis'),
+  ('d1000000-0000-0000-0000-000000000006', '22222222-2222-2222-2222-222222222222', 'Aerztin',    'd2000000-0000-0000-0000-000000000006', NULL, 'Mannschaftsaerztin'),
+  ('d1000000-0000-0000-0000-000000000007', '22222222-2222-2222-2222-222222222222', 'Admin',      'd2000000-0000-0000-0000-000000000007', NULL, 'Administration');
 
 INSERT INTO app.role_assignments (team_id, person_id, role, valid_from) VALUES
   ('22222222-2222-2222-2222-222222222222', 'd1000000-0000-0000-0000-000000000001', 'coach',           now() - interval '1 day'),
   ('22222222-2222-2222-2222-222222222222', 'd1000000-0000-0000-0000-000000000002', 'athletic_coach',  now() - interval '1 day'),
   ('22222222-2222-2222-2222-222222222222', 'd1000000-0000-0000-0000-000000000003', 'physio',          now() - interval '1 day'),
   ('22222222-2222-2222-2222-222222222222', 'd1000000-0000-0000-0000-000000000004', 'player',          now() - interval '1 day'),
-  ('22222222-2222-2222-2222-222222222222', 'd1000000-0000-0000-0000-000000000005', 'player',          now() - interval '1 day');
+  ('22222222-2222-2222-2222-222222222222', 'd1000000-0000-0000-0000-000000000005', 'player',          now() - interval '1 day'),
+  ('22222222-2222-2222-2222-222222222222', 'd1000000-0000-0000-0000-000000000006', 'doctor',          now() - interval '1 day'),
+  ('22222222-2222-2222-2222-222222222222', 'd1000000-0000-0000-0000-000000000007', 'admin',           now() - interval '1 day');
 
 -- Nummer 7 hat einen Score von heute, Nummer 9 hat keinen.
 INSERT INTO app.readiness_scores (team_id, person_id, date, score_total, band, factors) VALUES
@@ -70,6 +78,14 @@ CREATE FUNCTION app._t22_member(p_jersey int)
 RETURNS jsonb LANGUAGE sql AS $$
   SELECT m FROM jsonb_array_elements(app.rpc_morning_ops() -> 'members') m
   WHERE (m -> 'player' ->> 'jersey')::int = p_jersey;
+$$;
+
+-- Ein Mitglied des Payloads ueber seine Personen-id (Bridge Punkt 67: Staff
+-- und Medizin haben keine feste Rueckennummer, mehrere teilen die 0).
+CREATE FUNCTION app._t22_member_by_id(p_id uuid)
+RETURNS jsonb LANGUAGE sql AS $$
+  SELECT m FROM jsonb_array_elements(app.rpc_morning_ops() -> 'members') m
+  WHERE (m -> 'player' ->> 'id')::uuid = p_id;
 $$;
 
 SELECT has_function('app', 'rpc_morning_ops', ARRAY[]::text[], 'app.rpc_morning_ops existiert');
@@ -128,8 +144,10 @@ SELECT is((SELECT count(*)::int FROM jsonb_object_keys(app._t22_member(9) -> 're
 -- ---------------------------------------------------------------------------
 SELECT is(app.rpc_morning_ops() ->> 'kaderName', 'Band Team',
   'Unveraendert: kaderName');
-SELECT is(jsonb_array_length(app.rpc_morning_ops() -> 'members'), 5,
-  'Unveraendert: alle fuenf aktiven Personen');
+-- Bridge Punkt 67: nicht mehr alle sieben aktiven Personen, nur noch die
+-- zwei mit gueltiger Rolle player (siehe Abschnitt 9 unten).
+SELECT is(jsonb_array_length(app.rpc_morning_ops() -> 'members'), 2,
+  'Punkt 67: nur die aktiven Spielerinnen stehen im Payload, nicht alle aktiven Personen');
 SELECT is(app._t22_member(7) -> 'player' ->> 'name', 'Spielerin',
   'Unveraendert: player.name');
 SELECT is(app._t22_member(7) ->> 'hasCheckIn', 'false',
@@ -194,6 +212,36 @@ SELECT ok(pg_get_functiondef('app.rpc_morning_ops()'::regprocedure) NOT LIKE '%r
   'Regressionsanker: der Rumpf nennt rs.factors nicht mehr');
 SELECT ok(pg_get_functiondef('app.rpc_morning_ops()'::regprocedure) LIKE '%rs.band%',
   'Regressionsanker: der Rumpf nennt rs.band weiter');
+
+-- ---------------------------------------------------------------------------
+-- 9. Bridge Punkt 67 (2026-09-24): Rollenfilter im Kader-Payload
+-- ---------------------------------------------------------------------------
+-- Physio, Arzt (doctor) und Admin sind aktiv im selben Team, stehen aber
+-- nicht mehr im members-Array. Die Spielerinnen (7 und 9) stehen weiter drin.
+SET ROLE authenticated;
+SELECT app._t22_jwt('d2000000-0000-0000-0000-000000000001', 'coach');
+
+SELECT ok(app._t22_member_by_id('d1000000-0000-0000-0000-000000000003') IS NULL,
+  'Punkt 67: Physio steht nicht im members-Array');
+SELECT ok(app._t22_member_by_id('d1000000-0000-0000-0000-000000000006') IS NULL,
+  'Punkt 67: Arzt (doctor) steht nicht im members-Array');
+SELECT ok(app._t22_member_by_id('d1000000-0000-0000-0000-000000000007') IS NULL,
+  'Punkt 67: Admin steht nicht im members-Array');
+SELECT ok(app._t22_member_by_id('d1000000-0000-0000-0000-000000000001') IS NULL,
+  'Punkt 67: Trainerin (coach) steht nicht im members-Array');
+SELECT ok(app._t22_member_by_id('d1000000-0000-0000-0000-000000000002') IS NULL,
+  'Punkt 67: Athletiktrainer steht nicht im members-Array');
+SELECT ok(app._t22_member_by_id('d1000000-0000-0000-0000-000000000004') IS NOT NULL,
+  'Punkt 67: Spielerin mit Score steht weiter im members-Array');
+SELECT ok(app._t22_member_by_id('d1000000-0000-0000-0000-000000000005') IS NOT NULL,
+  'Punkt 67: Spielerin ohne Score steht weiter im members-Array');
+RESET ROLE;
+
+-- Regressionsanker: derselbe Rollenfilter wie app.rpc_list_team_members.
+SELECT ok(pg_get_functiondef('app.rpc_morning_ops()'::regprocedure) LIKE '%app.role_assignments%',
+  'Regressionsanker: der Rumpf prueft app.role_assignments');
+SELECT ok(pg_get_functiondef('app.rpc_morning_ops()'::regprocedure) LIKE '%''player''%',
+  'Regressionsanker: der Rumpf filtert auf die Rolle player');
 
 SELECT * FROM finish();
 ROLLBACK;

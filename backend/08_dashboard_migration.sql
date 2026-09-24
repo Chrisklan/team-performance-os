@@ -3,11 +3,22 @@
 -- Liefert den Coach-Kader-Payload (CoachKaderPayload-Form) fuer das
 -- Trainer-Dashboard aus app.persons, app.readiness_scores,
 -- app.daily_checkins und app.medical_clearances.
--- Stand: Migration 20260922000033 (AP-55, Befund N7 der Opus-Gegenlesung).
--- Davor 20260918000015 (AP-27/AP-32 Angleichung 2026-09-19), davor las die
--- Funktion public.*, das ist ersetzt.
+-- Stand: Migration <naechste_freie_nummer>_morning_ops_role_guard (Bridge
+-- Punkt 67, 2026-09-24). Davor 20260922000033 (AP-55, Befund N7 der
+-- Opus-Gegenlesung). Davor 20260918000015 (AP-27/AP-32 Angleichung
+-- 2026-09-19), davor las die Funktion public.*, das ist ersetzt.
 -- ADR-001 Silo: Scoping ausschliesslich ueber app.auth_team_id().
 -- ADR-009 Rollen-Matrix: nur Staff (coach/athletic_coach) darf lesen.
+--
+-- Bridge Punkt 67 (2026-09-23/24): die Personenauswahl filterte nur nach
+-- ap.team_id und ap.is_active, keine Rolle. Physio, Arzt und Admin standen
+-- deshalb mit in der "Kader"-Liste, sichtbar geworden beim ersten echten
+-- Rendern des Trainer-Kader-Screens (AP-46). Kein Datenleck (Name/Position
+-- duerfen Staff laut Matrix lesen), aber fachlich falsch. Gleicher Fix wie
+-- bei app.rpc_list_team_members (Punkt 66, backend/32_team_members_door.sql
+-- Zeile ~139-147): dasselbe EXISTS-Praedikat gegen app.role_assignments,
+-- role = 'player', mit Gueltigkeitsfenster. Liste und Kader-Payload duerfen
+-- nicht auseinanderlaufen, dieselbe Begruendung wie bei der Mitgliederliste.
 --
 -- Medizin-Gate (Modul-Rollen-Medizin-Gate Abschnitt 5, fett markierte Striche):
 -- Staff bekommt Zustandsklassen, nie Zahlwerte oder Verlaeufe. Der Payload
@@ -92,6 +103,19 @@ BEGIN
     ) mc ON true
     WHERE ap.team_id = v_team_id
       AND ap.is_active = true
+      -- Bridge Punkt 67: dasselbe Praedikat wie app.auth_target_is_team_player
+      -- und app.rpc_list_team_members, damit Liste und Kader-Payload nicht
+      -- auseinanderlaufen. Physio, Arzt und Admin verschwinden damit aus dem
+      -- Kader-Payload.
+      AND EXISTS (
+        SELECT 1
+          FROM app.role_assignments ra
+         WHERE ra.person_id = ap.id
+           AND ra.team_id   = ap.team_id
+           AND ra.role      = 'player'
+           AND ra.valid_from <= now()
+           AND (ra.valid_to IS NULL OR ra.valid_to > now())
+      )
   ) m;
 
   RETURN jsonb_build_object(
