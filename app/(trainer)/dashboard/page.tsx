@@ -7,6 +7,7 @@
 import { KaderGrid } from "@/components/trainer/KaderGrid";
 import { KaderStateScreen } from "@/components/trainer/KaderStateScreen";
 import { SignOutButton } from "@/components/trainer/SignOutButton";
+import { PasswordLink } from "@/components/account/PasswordLink";
 import {
   KaderAccessError,
   fetchKaderForCoach,
@@ -60,6 +61,7 @@ export default async function TrainerDashboardPage() {
             />
             {isLive ? "Live" : "Letzter Sync"}
           </span>
+          <PasswordLink />
           <SignOutButton />
         </div>
       </header>

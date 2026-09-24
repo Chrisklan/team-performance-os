@@ -2,13 +2,17 @@
 // Zwei Wege:
 //  * ?code=...            PKCE, Standard von signInWithOtp (Verifier-Cookie im selben Browser)
 //  * ?token_hash=&type=   Mail-Vorlage mit Token-Hash oder Test per generate_link
-// Erfolg: Session-Cookies gesetzt, weiter auf "next" (nur interne Pfade).
+// Erfolg: Session-Cookies gesetzt, weiter auf "next" (nur interne Pfade). Hat das Konto
+// noch kein eigenes Passwort, kommt vorher das Angebot auf /konto/passwort (ueberspringbar).
 // Fehler: zurueck auf /login mit Hinweis, kein Detail aus GoTrue nach aussen.
 
 import { NextResponse, type NextRequest } from "next/server";
 import type { EmailOtpType } from "@supabase/supabase-js";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { safeNextPath } from "@/lib/supabase/auth-redirect";
+import { hasOwnPassword } from "@/lib/supabase/password";
+
+const PASSWORD_PAGE = "/konto/passwort";
 
 const OTP_TYPES: readonly EmailOtpType[] = [
   "magiclink",
@@ -42,6 +46,15 @@ export async function GET(request: NextRequest) {
     loginUrl.searchParams.set("error", "callback");
     loginUrl.searchParams.set("next", next);
     return NextResponse.redirect(loginUrl);
+  }
+
+  if (next !== PASSWORD_PAGE) {
+    const { data } = await supabase.auth.getUser();
+    if (data.user && !hasOwnPassword(data.user.user_metadata)) {
+      const offerUrl = new URL(PASSWORD_PAGE, origin);
+      offerUrl.searchParams.set("next", next);
+      return NextResponse.redirect(offerUrl);
+    }
   }
   return NextResponse.redirect(new URL(next, origin));
 }

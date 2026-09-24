@@ -1,4 +1,4 @@
-// Team Performance OS — Anmeldung fuer das Trainerteam (Magic-Link).
+// Team Performance OS — Anmeldung fuer das Trainerteam (Passwort oder Anmeldelink).
 // Komposition: dominante Aussage links (7 Teile), ruhige Formularflaeche rechts (5 Teile),
 // beide auf derselben Mittelachse. Wortmarke oben links.
 // Tablet und Phone stapeln: Aussage oben, Formular darunter.
@@ -14,7 +14,7 @@ export const metadata: Metadata = {
 
 const NOTICES: Record<string, string> = {
   callback:
-    "Der Anmeldelink ist abgelaufen oder wurde schon verwendet. Fordere unten einen neuen an.",
+    "Der Link ist abgelaufen oder wurde schon verwendet. Fordere unten einen neuen an.",
   signedout: "Du bist abgemeldet.",
 };
 

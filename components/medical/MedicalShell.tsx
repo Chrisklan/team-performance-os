@@ -10,6 +10,7 @@
 
 import Link from "next/link";
 import { SignOutButton } from "@/components/trainer/SignOutButton";
+import { PasswordLink } from "@/components/account/PasswordLink";
 import { medicalRoleLabel } from "@/lib/medical/format";
 import type { MedicalRole } from "@/lib/medical/role";
 import type { TeamMember } from "@/lib/medical/types";
@@ -50,7 +51,10 @@ export function MedicalShell({ role, members, selectedId, children }: MedicalShe
           </p>
           <p className="text-xs text-muted">Angemeldet als {medicalRoleLabel(role)}</p>
         </div>
-        <SignOutButton />
+        <div className="flex items-center gap-2">
+          <PasswordLink />
+          <SignOutButton />
+        </div>
       </header>
 
       <div className="flex flex-1 flex-col md:flex-row">

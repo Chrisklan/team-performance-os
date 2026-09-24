@@ -10,11 +10,13 @@ import { NextResponse, type NextRequest } from "next/server";
 import { supabaseEnv } from "./env";
 import { appRoleFromClaims, homePathForRole } from "@/lib/medical/role";
 
-// Routen, die eine Anmeldung brauchen: app/(trainer) und app/(medizin).
+// Routen, die eine Anmeldung brauchen: app/(trainer), app/(medizin) und app/konto.
 // Neue geschuetzte Seiten hier eintragen. Die Rolle prueft die Seite selbst.
 export const TRAINER_ROUTES = ["/dashboard"] as const;
 export const MEDICAL_ROUTES = ["/medizin"] as const;
-const PROTECTED_ROUTES = [...TRAINER_ROUTES, ...MEDICAL_ROUTES];
+// Eigenes Konto (Passwort festlegen), fuer jede Rolle.
+export const ACCOUNT_ROUTES = ["/konto"] as const;
+const PROTECTED_ROUTES = [...TRAINER_ROUTES, ...MEDICAL_ROUTES, ...ACCOUNT_ROUTES];
 
 function isProtectedRoute(pathname: string): boolean {
   return PROTECTED_ROUTES.some(
