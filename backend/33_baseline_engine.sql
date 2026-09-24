@@ -118,6 +118,12 @@ DROP FUNCTION IF EXISTS app.rpc_rebuild_baseline_history(uuid, date, date);
 DROP FUNCTION IF EXISTS app.rpc_recompute_baselines(date);
 DROP FUNCTION IF EXISTS app._compute_baseline(text, uuid, app.app_metric, date);
 DROP FUNCTION IF EXISTS public.rpc_get_my_baselines(date);
+-- Erst beim Cloud-Einspielen entdeckt (lokal nie vorhanden): haengen an
+-- app.metric_deviations, sonst kein Aufrufer (public hat keine Tuer fuer
+-- beide, gemessen 2026-09-24). Vor dem DROP TABLE explizit weg, keine
+-- CASCADE-Ueberraschung.
+DROP FUNCTION IF EXISTS app.rpc_compute_deviations(uuid, date);
+DROP VIEW IF EXISTS app.v_deviations_staff;
 
 DROP TABLE IF EXISTS app.metric_deviations;
 DROP TABLE IF EXISTS app.baselines;
@@ -187,6 +193,17 @@ CREATE TABLE app.metric_deviations (
 CREATE INDEX ON app.metric_deviations (team_id, date desc, band);
 
 REVOKE ALL ON app.baselines, app.metric_deviations FROM PUBLIC, anon, authenticated;
+
+-- Medizin-Gate (Modul-Spec Abschnitt 5): pain_max ist medizinisch, Staff
+-- (coach/athletic_coach) darf sie nicht ueber metric_deviations sehen.
+-- Kein direkter Tabellenzugriff fuer authenticated (siehe REVOKE ALL oben) --
+-- Zugriff laeuft ausschliesslich ueber SECURITY DEFINER Funktionen, wie im
+-- Rest des Projekts (Muster D). Die View existiert als Grundlage fuer die
+-- naechste Session (staff-only Deviation-Tuer, Bridge Punkt 57 Teil 2).
+CREATE OR REPLACE VIEW app.v_deviations_staff AS
+  SELECT id, team_id, person_id, metric, date, value, baseline_id, z, delta_abs, delta_pct, band, computed_at
+    FROM app.metric_deviations
+   WHERE metric <> 'pain_max';
 
 -- -----------------------------------------------------------------------------
 -- 4. app._compute_baseline — Median/MAD/Cluster-Blend, Rohwerte aus daily_checkins
@@ -353,6 +370,67 @@ END;
 $$;
 
 REVOKE EXECUTE ON FUNCTION app._compute_baseline(uuid, uuid, app.app_metric, date) FROM PUBLIC, anon, authenticated;
+
+-- -----------------------------------------------------------------------------
+-- 4b. app.rpc_compute_deviations — Tagesabweichung on-submit (On-Submit-Pfad
+--     aus der Modul-Spec Abschnitt 4, Wiring an rpc_submit_checkin ist Punkt
+--     einer eigenen Session, nicht Teil dieser Migration). Rechenlogik 1:1
+--     aus der toten Vorgaengerfunktion, Vokabular auf team_id/person_id.
+-- -----------------------------------------------------------------------------
+
+CREATE OR REPLACE FUNCTION app.rpc_compute_deviations(p_person_id uuid, p_date date)
+RETURNS SETOF app.metric_deviations
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path = app, pg_temp
+AS $$
+DECLARE
+  b             app.baselines%rowtype;
+  v_value       numeric(8,3);
+  v_z           numeric(6,3);
+  v_delta_abs   numeric(8,3);
+  v_delta_pct   numeric(6,2);
+  v_band        text;
+  v_sigma_floor numeric(8,3);
+  v_ret         app.metric_deviations%rowtype;
+BEGIN
+  FOR b IN
+    SELECT * FROM app.baselines
+     WHERE person_id = p_person_id AND as_of = p_date AND status = 'ok'
+  LOOP
+    SELECT (to_jsonb(dc) ->> b.metric::text)::numeric INTO v_value
+      FROM app.daily_checkins dc
+     WHERE dc.person_id = p_person_id AND dc.date = p_date;
+
+    IF v_value IS NULL THEN CONTINUE; END IF;
+
+    SELECT sigma_floor INTO v_sigma_floor
+      FROM app.baseline_metric_config WHERE metric = b.metric;
+
+    v_delta_abs := round((v_value - b.median)::numeric, 3);
+    v_z         := round((v_value - b.median) / greatest(b.sigma, v_sigma_floor)::numeric, 3);
+    v_delta_pct := round(CASE WHEN b.median <> 0 THEN (v_delta_abs / b.median * 100) ELSE 0 END::numeric, 2);
+    v_band      := CASE WHEN abs(v_z) < 1 THEN 'normal' WHEN abs(v_z) < 2 THEN 'watch' ELSE 'marked' END;
+
+    INSERT INTO app.metric_deviations (team_id, person_id, metric, date, value,
+                                       baseline_id, z, delta_abs, delta_pct, band, computed_at)
+    VALUES (b.team_id, p_person_id, b.metric, p_date, v_value, b.id, v_z, v_delta_abs, v_delta_pct, v_band, now())
+    ON CONFLICT (person_id, metric, date)
+    DO UPDATE SET value = EXCLUDED.value, baseline_id = EXCLUDED.baseline_id, z = EXCLUDED.z,
+                  delta_abs = EXCLUDED.delta_abs, delta_pct = EXCLUDED.delta_pct,
+                  band = EXCLUDED.band, computed_at = now();
+
+    SELECT * INTO v_ret FROM app.metric_deviations
+     WHERE person_id = p_person_id AND metric = b.metric AND date = p_date;
+    RETURN NEXT v_ret;
+  END LOOP;
+  RETURN;
+END;
+$$;
+
+REVOKE EXECUTE ON FUNCTION app.rpc_compute_deviations(uuid, date) FROM PUBLIC, anon, authenticated;
+GRANT  EXECUTE ON FUNCTION app.rpc_compute_deviations(uuid, date) TO service_role;
 
 -- -----------------------------------------------------------------------------
 -- 5. app.rpc_recompute_baselines — Nachtlauf, service_role (Cron 03:00)
