@@ -69,6 +69,15 @@ export async function fetchTeamMembers(supabase: ServerClient): Promise<TeamMemb
   return Array.isArray(payload.members) ? payload.members : [];
 }
 
+// public.rpc_get_module_flag. Eigene Funktion statt callDoor: der Rueckgabewert
+// ist ein Boolean, "false" ist eine gueltige Antwort und darf nicht wie eine
+// leere Antwort behandelt werden (callDoor prueft auf falsy).
+export async function fetchModuleFlag(supabase: ServerClient, flag: string): Promise<boolean> {
+  const { data, error, status } = await supabase.rpc("rpc_get_module_flag", { p_flag: flag });
+  if (error) throw classifyRpcError(error, status);
+  return data === true;
+}
+
 export const REPORT_DAYS = 28;
 
 // Erst die Regionen: ihre Tuer rechnet den Zeitraum in der Zeitzone des Teams.

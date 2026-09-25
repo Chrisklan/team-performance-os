@@ -6,7 +6,14 @@
 
 import { MedicalShell } from "@/components/medical/MedicalShell";
 import { MedicalStateScreen } from "@/components/medical/MedicalStateScreen";
-import { MedicalAccessError, fetchTeamMembers, requireMedicalSession } from "@/lib/medical/api";
+import { ModuleFlagPanel } from "@/components/medical/ModuleFlagPanel";
+import {
+  MedicalAccessError,
+  fetchModuleFlag,
+  fetchTeamMembers,
+  requireMedicalSession,
+} from "@/lib/medical/api";
+import { LOAD_DEVIATION_FLAG } from "@/lib/medical/types";
 
 // Jede Anfrage neu, nichts aus einem Zwischenspeicher.
 export const metadata = { title: "Medizin · Kaderliste · Team Performance OS" };
@@ -18,8 +25,18 @@ export default async function MedizinPage() {
   try {
     const { supabase, role } = await requireMedicalSession();
     const members = await fetchTeamMembers(supabase);
+    // ModuleFlagPanel ist nur Arzt vorbehalten (Modul-LoadDeviation.md Abschnitt 6),
+    // die Tuer selbst lehnt physio ohnehin ab -- der Aufruf entfaellt fuer physio ganz.
+    const moduleFlagEnabled =
+      role === "doctor" ? await fetchModuleFlag(supabase, LOAD_DEVIATION_FLAG) : null;
     return (
-      <MedicalShell role={role} members={members}>
+      <MedicalShell
+        role={role}
+        members={members}
+        topPanel={
+          moduleFlagEnabled !== null ? <ModuleFlagPanel initialEnabled={moduleFlagEnabled} /> : undefined
+        }
+      >
         <section className="flex max-w-xl flex-col gap-4">
           <h1 className="font-display text-xl font-bold uppercase leading-tight text-ink">
             Spielerin wählen

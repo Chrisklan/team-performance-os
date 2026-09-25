@@ -7,6 +7,11 @@
 //
 // Unter md steht nur eine Spalte. Ohne Auswahl ist das die Liste, mit Auswahl die
 // Spielerin samt Weg zurueck zur Liste.
+//
+// topPanel steht ausserhalb dieser Auswahl-Logik, direkt unter dem Header, auf
+// jedem Breakpoint und unabhaengig von hasSelection sichtbar (Bridge Punkt 77b,
+// ModuleFlagPanel): eine team-globale Einstellung darf auf dem Handy nicht
+// verschwinden, nur weil main ohne Auswahl dort ausgeblendet ist.
 
 import Link from "next/link";
 import { SignOutButton } from "@/components/trainer/SignOutButton";
@@ -20,6 +25,7 @@ type MedicalShellProps = {
   role: MedicalRole;
   members: TeamMember[];
   selectedId?: string;
+  topPanel?: React.ReactNode;
   children: React.ReactNode;
 };
 
@@ -39,7 +45,7 @@ function Pitch() {
   );
 }
 
-export function MedicalShell({ role, members, selectedId, children }: MedicalShellProps) {
+export function MedicalShell({ role, members, selectedId, topPanel, children }: MedicalShellProps) {
   const hasSelection = Boolean(selectedId);
 
   return (
@@ -56,6 +62,10 @@ export function MedicalShell({ role, members, selectedId, children }: MedicalShe
           <SignOutButton />
         </div>
       </header>
+
+      {topPanel ? (
+        <div className="border-b border-white/10 bg-field px-6 py-4 md:px-8">{topPanel}</div>
+      ) : null}
 
       <div className="flex flex-1 flex-col md:flex-row">
         <aside

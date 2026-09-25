@@ -136,3 +136,9 @@ export type LoadDeviation = {
   released_at: string | null;
   created_at: string;
 };
+
+// app.module_flags, einziger bisher verwendeter Flag-Name (Modul-LoadDeviation.md
+// Abschnitt 4, backend/35_load_deviation.sql Abschnitt 3). Nur `doctor` darf ihn
+// setzen (public.rpc_set_module_flag), jede authentifizierte Rolle darf ihn lesen
+// (public.rpc_get_module_flag), das ModuleFlagPanel zeigt ihn nur dem Arzt.
+export const LOAD_DEVIATION_FLAG = "loaddeviation_enabled";
