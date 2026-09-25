@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { countPhrase, dayAxis, regionsOfBodyMap, reportedDaysByRegion } from "./bodymap";
-import { clearanceLabel, shortDate, sleepHours, valueOrDot } from "./format";
+import { clearanceLabel, deviationPersistence, shortDate, sleepHours, valueOrDot } from "./format";
 import { appRoleFromClaims, homePathForRole, isMedicalRole, isUuid } from "./role";
 import type { CheckinDay } from "./types";
 
@@ -88,5 +88,10 @@ describe("Format ohne Striche", () => {
     expect(sleepHours(450)).toBe("7:30 h");
     expect(shortDate("2026-09-22")).toBe("Di 22.09.");
     expect(clearanceLabel("blocked")).toBe("Gesperrt");
+  });
+  it("Persistenzzähler ohne Bewertung, kein Text ohne Wert", () => {
+    expect(deviationPersistence(4)).toBe("4 von 7 Tagen außerhalb der Norm");
+    expect(deviationPersistence(0)).toBe("0 von 7 Tagen außerhalb der Norm");
+    expect(deviationPersistence(null)).toBeNull();
   });
 });

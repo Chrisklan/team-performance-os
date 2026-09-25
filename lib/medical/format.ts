@@ -107,3 +107,11 @@ export function deviationPercent(value: number): string {
   if (rounded < 0) return `−${formatted} %`;
   return `${formatted} %`;
 }
+
+// "4 von 7 Tagen außerhalb der Norm" (Modul-LoadDeviation.md Abschnitt 2,
+// Persistenzzaehler days_out_7). Nur die Dauer, keine Bewertung. Fehlender Wert
+// (noch keine 7-Tage-Reihe): kein Text statt eines erfundenen Werts.
+export function deviationPersistence(daysOut7: number | null): string | null {
+  if (daysOut7 === null || daysOut7 === undefined) return null;
+  return `${daysOut7} von 7 Tagen außerhalb der Norm`;
+}

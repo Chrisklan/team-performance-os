@@ -4,6 +4,7 @@
 // Client-Component-Baum von KaderGrid.
 // Fehler werden nicht durch Fixtures ersetzt: jeder Fall hat einen eigenen Zustand.
 
+import Link from "next/link";
 import { KaderGrid } from "@/components/trainer/KaderGrid";
 import { KaderStateScreen } from "@/components/trainer/KaderStateScreen";
 import { SignOutButton } from "@/components/trainer/SignOutButton";
@@ -61,6 +62,12 @@ export default async function TrainerDashboardPage() {
             />
             {isLive ? "Live" : "Letzter Sync"}
           </span>
+          <Link
+            href="/dashboard/abweichungen"
+            className="flex h-12 items-center justify-center rounded-md px-4 text-sm text-muted transition-colors hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-signal"
+          >
+            Abweichungen heute
+          </Link>
           <PasswordLink />
           <SignOutButton />
         </div>
