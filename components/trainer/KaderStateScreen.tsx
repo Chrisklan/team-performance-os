@@ -34,6 +34,10 @@ const COPY: Record<KaderStateKind, Copy> = {
     title: "Kader konnte nicht geladen werden",
     body: "Der Server hat die Anfrage nicht beantwortet. Es werden bewusst keine Ersatzdaten angezeigt. Lade die Seite erneut. Bleibt der Fehler, gib den Fehlercode weiter.",
   },
+  MODULE_DISABLED: {
+    title: "Noch nicht freigeschaltet",
+    body: "Dieses Modul ist für dein Team noch nicht freigeschaltet. Das entscheidet ausschließlich die Ärztin oder der Arzt.",
+  },
   EMPTY: {
     title: "Noch kein Kader",
     body: "Für dein Team sind noch keine Personen im Kader hinterlegt. Sobald Personen angelegt sind, erscheinen sie hier.",

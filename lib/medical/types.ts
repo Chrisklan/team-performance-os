@@ -102,3 +102,37 @@ export type PersonDetail = {
   readiness: ReadinessPayload;
   clearance: ClearancePayload;
 };
+
+// public.rpc_get_person_deviations (LoadDeviation, Modul 5, Bridge Punkt 57 Teil 3).
+// Feldnamen wie die Tuer sie liefert (backend/35_load_deviation.sql, Abschnitt 8).
+export type DeviationMetric =
+  | "sleep_duration_min"
+  | "sleep_quality"
+  | "recovery"
+  | "mental_stress"
+  | "mental_mood"
+  | "mental_motivation"
+  | "session_load"
+  | "acute_chronic_ratio"
+  | "pain_max";
+
+export type DeviationState = "unreviewed" | "released" | "dismissed";
+
+export type LoadDeviation = {
+  id: string;
+  person_id: string;
+  metric: DeviationMetric;
+  deviation_pct: number;
+  detected_on: string;
+  state: DeviationState;
+  streak_days: number | null;
+  days_out_7: number | null;
+  z_mean_7: number | null;
+  trend_slope_7: number | null;
+  magnitude: number | null;
+  statement_key: string | null;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  released_at: string | null;
+  created_at: string;
+};

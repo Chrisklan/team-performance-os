@@ -20,6 +20,7 @@ import { appRoleFromClaims, isMedicalRole, type MedicalRole } from "./role";
 import type {
   CheckinsPayload,
   ClearancePayload,
+  LoadDeviation,
   PersonDetail,
   ReadinessPayload,
   RegionReportsPayload,
@@ -89,4 +90,23 @@ export async function fetchPersonDetail(
     callDoor<ClearancePayload>(supabase, "rpc_get_clearance", { p_person_id: personId }),
   ]);
   return { regions, checkins, readiness, clearance };
+}
+
+// LoadDeviation (Modul 5, Bridge Punkt 57 Teil 3). Bewusst getrennt von
+// fetchPersonDetail: MODULE_DISABLED ist keine Rechtefrage, sondern eine noch
+// nicht getroffene Entscheidung des Arztes, und darf die vier bestehenden
+// Abschnitte der Seite nicht mit wegreissen (dieselbe Person kann fuer
+// Readiness und Check-ins trotzdem sichtbar sein).
+export async function fetchPersonDeviations(
+  supabase: ServerClient,
+  personId: string,
+  from: string,
+  to: string,
+): Promise<LoadDeviation[]> {
+  const payload = await callDoor<LoadDeviation[]>(supabase, "rpc_get_person_deviations", {
+    p_person_id: personId,
+    p_from: from,
+    p_to: to,
+  });
+  return Array.isArray(payload) ? payload : [];
 }

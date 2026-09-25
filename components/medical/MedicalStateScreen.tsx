@@ -29,6 +29,10 @@ const COPY: Record<MedicalStateKind, { title: string; body: string }> = {
     title: "Laden fehlgeschlagen",
     body: "Der Server hat die Anfrage nicht beantwortet. Es werden bewusst keine Ersatzdaten angezeigt. Lade die Seite erneut. Bleibt der Fehler, gib den Fehlercode weiter.",
   },
+  MODULE_DISABLED: {
+    title: "Noch nicht freigeschaltet",
+    body: "LoadDeviation ist für dieses Team noch nicht freigeschaltet. Das entscheidet ausschließlich die Ärztin oder der Arzt.",
+  },
   PERSON_FORBIDDEN: {
     title: "Diese Person ist nicht freigegeben",
     body: "Sie ist keine aktive Spielerin deines Teams. Der Versuch steht im Zugriffsprotokoll. Wähle eine Spielerin aus der Kaderliste.",

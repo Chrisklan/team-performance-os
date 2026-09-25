@@ -11,6 +11,7 @@
 import { notFound } from "next/navigation";
 import { CheckinTable } from "@/components/medical/CheckinTable";
 import { ClearanceBlock } from "@/components/medical/ClearanceBlock";
+import { DeviationSection } from "@/components/medical/DeviationSection";
 import { MedicalShell } from "@/components/medical/MedicalShell";
 import { MedicalStateScreen } from "@/components/medical/MedicalStateScreen";
 import { ReadinessSection } from "@/components/medical/ReadinessSection";
@@ -18,11 +19,12 @@ import { RegionTally } from "@/components/medical/RegionTally";
 import {
   MedicalAccessError,
   fetchPersonDetail,
+  fetchPersonDeviations,
   fetchTeamMembers,
   requireMedicalSession,
 } from "@/lib/medical/api";
 import { isUuid } from "@/lib/medical/role";
-import type { PersonDetail } from "@/lib/medical/types";
+import type { LoadDeviation, PersonDetail } from "@/lib/medical/types";
 
 export const metadata = { title: "Medizin · Spielerin · Team Performance OS" };
 
@@ -96,6 +98,18 @@ export default async function MedizinPersonPage({ params }: PageProps) {
     throw error;
   }
 
+  // LoadDeviation getrennt von fetchPersonDetail: MODULE_DISABLED ist kein
+  // Fehler der ganzen Seite, sondern ein eigener, ruhiger Zustand nur dieses
+  // Abschnitts (Bridge Punkt 57 Teil 3).
+  let deviations: LoadDeviation[] | null = null;
+  let deviationsError: MedicalAccessError | null = null;
+  try {
+    deviations = await fetchPersonDeviations(supabase, member.id, detail.regions.from, detail.regions.to);
+  } catch (error) {
+    if (error instanceof MedicalAccessError) deviationsError = error;
+    else throw error;
+  }
+
   return (
     <MedicalShell role={role} members={members} selectedId={member.id}>
       <header className="flex flex-col gap-6 border-b-2 border-muted pb-6">
@@ -115,6 +129,7 @@ export default async function MedizinPersonPage({ params }: PageProps) {
       <div className="flex flex-col gap-12 border-t-2 border-muted pt-8">
         <ReadinessSection readiness={detail.readiness} />
         <CheckinTable checkins={detail.checkins.checkins} regionLabels={detail.regions.regions} />
+        <DeviationSection personId={member.id} deviations={deviations} error={deviationsError} />
       </div>
 
       <p className="text-xs text-muted">

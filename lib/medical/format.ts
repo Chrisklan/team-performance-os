@@ -1,6 +1,6 @@
 // Team Performance OS — Formatierung der Medizinsicht (rein, testbar). Keine Bindestriche in UI Copy.
 
-import type { ClearanceStatus } from "./types";
+import type { ClearanceStatus, DeviationMetric, DeviationState } from "./types";
 
 const CLEARANCE_LABELS: Record<ClearanceStatus, string> = {
   full: "Freigegeben",
@@ -67,4 +67,43 @@ const FACTOR_LABELS: Record<string, string> = {
 
 export function factorLabel(key: string): string {
   return FACTOR_LABELS[key] ?? key;
+}
+
+// LoadDeviation (Modul 5). Dieselben deutschen Namen wie CheckinTable, wo die
+// Metrik auch dort vorkommt (sleep_duration_min, mental_stress, ...).
+const DEVIATION_METRIC_LABELS: Record<DeviationMetric, string> = {
+  sleep_duration_min: "Schlafdauer",
+  sleep_quality: "Schlafqualität",
+  recovery: "Erholung",
+  mental_stress: "Stress",
+  mental_mood: "Stimmung",
+  mental_motivation: "Motivation",
+  session_load: "Trainingslast",
+  acute_chronic_ratio: "Wochenlast",
+  pain_max: "Schmerz höchster",
+};
+
+export function deviationMetricLabel(metric: DeviationMetric): string {
+  return DEVIATION_METRIC_LABELS[metric] ?? metric;
+}
+
+const DEVIATION_STATE_LABELS: Record<DeviationState, string> = {
+  unreviewed: "Ungesichtet",
+  released: "Freigegeben",
+  dismissed: "Verworfen",
+};
+
+export function deviationStateLabel(state: DeviationState): string {
+  return DEVIATION_STATE_LABELS[state] ?? state;
+}
+
+// "+12,3 %" bzw. "−8,0 %" (echtes Minuszeichen, kein Bindestrich). Nur die Zahl,
+// keine Bewertung ("ueber/unter der Norm") -- die Deskription bleibt der Tuer
+// rpc_get_deviation_statement vorbehalten, die diese Seite nicht aufruft.
+export function deviationPercent(value: number): string {
+  const rounded = Math.round(value * 10) / 10;
+  const formatted = Math.abs(rounded).toFixed(1).replace(".", ",");
+  if (rounded > 0) return `+${formatted} %`;
+  if (rounded < 0) return `−${formatted} %`;
+  return `${formatted} %`;
 }

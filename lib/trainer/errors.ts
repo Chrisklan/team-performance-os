@@ -17,6 +17,7 @@ export type KaderErrorCode =
   | "FORBIDDEN"
   | "NOT_FOUND"
   | "NETWORK"
+  | "MODULE_DISABLED"
   | "RPC_FAILED";
 
 type RpcErrorLike = { code?: string | null; message?: string | null };
@@ -28,6 +29,9 @@ type RpcErrorLike = { code?: string | null; message?: string | null };
 //  * P0002 oder HTTP 404 (nicht gefunden)  -> NOT_FOUND. Seit Punkt 64 antworten die
 //    Tueren darauf mit 404 statt 500; die Oberflaeche zeigt "gibt es nicht" statt
 //    "Server kaputt".
+//  * 55000 (MODULE_DISABLED, LoadDeviation) -> MODULE_DISABLED. Keine Rechtefrage
+//    (Modul-LoadDeviation.md Abschnitt 7), sondern eine Produktentscheidung des
+//    Arztes -- kein Fehlerzustand, sondern ein ruhiger Hinweis.
 //  * alles andere                       -> RPC_FAILED mit Code als Detail
 export function classifyRpcError(
   error: RpcErrorLike,
@@ -44,6 +48,9 @@ export function classifyRpcError(
   }
   if (error.code === "P0002" || status === 404) {
     return new KaderAccessError("Nicht gefunden.", "NOT_FOUND", error.code || "404");
+  }
+  if (error.code === "55000") {
+    return new KaderAccessError("Modul nicht freigeschaltet.", "MODULE_DISABLED", "55000");
   }
   return new KaderAccessError(
     `Kader konnte nicht geladen werden (${error.code || "unbekannt"}).`,
