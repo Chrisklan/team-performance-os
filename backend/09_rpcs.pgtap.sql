@@ -35,8 +35,8 @@ INSERT INTO app.daily_checkins (id, team_id, person_id, date, body_map) VALUES
 INSERT INTO app.readiness_scores (id, team_id, person_id, date, score_total, band, factors) VALUES
   ('99999999-9999-9999-9999-999999999999', '11111111-1111-1111-1111-111111111111', '66666666-6666-6666-6666-666666666666', '2026-09-01', 85.5, 'high', '{"sleep": 8.0}'::jsonb);
 
-INSERT INTO app.load_deviations (id, team_id, person_id, date, deviation, state) VALUES
-  ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '11111111-1111-1111-1111-111111111111', '66666666-6666-6666-6666-666666666666', '2026-09-01', 15.5, 'unreviewed');
+INSERT INTO app.load_deviations (id, team_id, person_id, metric, date, deviation, state) VALUES
+  ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '11111111-1111-1111-1111-111111111111', '66666666-6666-6666-6666-666666666666', 'sleep_duration_min', '2026-09-01', 15.5, 'unreviewed');
 
 INSERT INTO app.medical_clearances (team_id, person_id, status, load_note, valid_from, set_by, set_by_role) VALUES
   ('11111111-1111-1111-1111-111111111111', '66666666-6666-6666-6666-666666666666', 'limited', 'max 60 min', '2026-09-01', '55555555-5555-5555-5555-555555555555', 'doctor');
@@ -91,8 +91,8 @@ INSERT INTO app.readiness_scores (id, team_id, person_id, date, score_total, ban
   ('99999999-9999-9999-9999-999999999999', '11111111-1111-1111-1111-111111111111', '66666666-6666-6666-6666-666666666666', '2026-09-01', 85.5, 'high', '{"sleep": 8.0}'::jsonb)
 ON CONFLICT DO NOTHING;
 
-INSERT INTO app.load_deviations (id, team_id, person_id, date, deviation, state) VALUES
-  ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '11111111-1111-1111-1111-111111111111', '66666666-6666-6666-6666-666666666666', '2026-09-01', 15.5, 'unreviewed')
+INSERT INTO app.load_deviations (id, team_id, person_id, metric, date, deviation, state) VALUES
+  ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '11111111-1111-1111-1111-111111111111', '66666666-6666-6666-6666-666666666666', 'sleep_duration_min', '2026-09-01', 15.5, 'unreviewed')
 ON CONFLICT DO NOTHING;
 
 -- =============================================================================

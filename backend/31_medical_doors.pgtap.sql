@@ -49,8 +49,8 @@ INSERT INTO app.daily_checkins (team_id, person_id, date, sleep_quality, energy,
   ('a2000000-0000-0000-0000-000000000002','b2000000-0000-0000-0000-000000000002', current_date - 1, 3, 2, 2, '{"ruecken":8}'::jsonb, 8);
 INSERT INTO app.readiness_scores (team_id, person_id, date, score_total, band, factors) VALUES
   ('a1000000-0000-0000-0000-000000000001','b1000000-0000-0000-0000-000000000001', current_date - 1, 81.0, 'moderate', '{"sleep":0.8,"soreness":0.4}'::jsonb);
-INSERT INTO app.load_deviations (id, team_id, person_id, date, deviation, state) VALUES
-  ('f1000000-0000-0000-0000-000000000001','a1000000-0000-0000-0000-000000000001','b1000000-0000-0000-0000-000000000001', current_date - 1, 22.5, 'unreviewed');
+INSERT INTO app.load_deviations (id, team_id, person_id, metric, date, deviation, state) VALUES
+  ('f1000000-0000-0000-0000-000000000001','a1000000-0000-0000-0000-000000000001','b1000000-0000-0000-0000-000000000001', 'sleep_duration_min', current_date - 1, 22.5, 'unreviewed');
 INSERT INTO app.medical_clearances (team_id, person_id, status, load_note, valid_from, set_by, set_by_role) VALUES
   ('a1000000-0000-0000-0000-000000000001','b1000000-0000-0000-0000-000000000001','limited','Nur Rad', current_date - 1,'d2000000-0000-0000-0000-000000000002','doctor');
 
@@ -196,8 +196,8 @@ SELECT is((SELECT resource FROM app.access_log ORDER BY id DESC LIMIT 1), 'daily
 -- -----------------------------------------------------------------------------
 -- 6. Befund A3: die Freigabe einer Abweichung wird protokolliert (3)
 -- -----------------------------------------------------------------------------
-INSERT INTO app.load_deviations (id, team_id, person_id, date, deviation, state) VALUES
-  ('f3000000-0000-0000-0000-000000000003','a1000000-0000-0000-0000-000000000001','b1000000-0000-0000-0000-000000000001', current_date, 18.0, 'unreviewed');
+INSERT INTO app.load_deviations (id, team_id, person_id, metric, date, deviation, state) VALUES
+  ('f3000000-0000-0000-0000-000000000003','a1000000-0000-0000-0000-000000000001','b1000000-0000-0000-0000-000000000001', 'sleep_duration_min', current_date, 18.0, 'unreviewed');
 CREATE TEMP TABLE _a3 AS SELECT count(*) AS n FROM app.access_log;
 SELECT app._t31_jwt('d1000000-0000-0000-0000-000000000001','physio');
 SELECT ok(NOT app.is_denial(public.rpc_review_deviation('f3000000-0000-0000-0000-000000000003','release')), 'A3: die Physio gibt eine Abweichung frei');

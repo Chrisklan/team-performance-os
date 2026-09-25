@@ -63,8 +63,8 @@ INSERT INTO app.daily_checkins (team_id, person_id, date, body_map, pain_max, sl
 INSERT INTO app.readiness_scores (team_id, person_id, date, score_total, band, factors) VALUES
   ('e0000000-0000-0000-0000-000000000001', 'e1000000-0000-0000-0000-000000000004', '2026-09-01', 71.5, 'moderate', '{"sleep": 6, "muscle": 4}'::jsonb);
 
-INSERT INTO app.load_deviations (team_id, person_id, date, deviation, state) VALUES
-  ('e0000000-0000-0000-0000-000000000001', 'e1000000-0000-0000-0000-000000000004', '2026-09-01', 18.25, 'unreviewed');
+INSERT INTO app.load_deviations (team_id, person_id, metric, date, deviation, state) VALUES
+  ('e0000000-0000-0000-0000-000000000001', 'e1000000-0000-0000-0000-000000000004', 'sleep_duration_min', '2026-09-01', 18.25, 'unreviewed');
 
 -- Freigabe FUER P, gesetzt VON D.
 INSERT INTO app.medical_clearances (team_id, person_id, status, load_note, valid_from, set_by, set_by_role) VALUES
