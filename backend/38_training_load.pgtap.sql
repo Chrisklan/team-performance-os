@@ -18,7 +18,7 @@
 
 BEGIN;
 SET search_path = public, pgtap;
-SELECT plan(56);
+SELECT plan(80);
 
 INSERT INTO app.teams (id, name, timezone) VALUES
   ('f6000000-0000-0000-0000-000000000001','Team F6','Europe/Berlin'),
@@ -63,6 +63,53 @@ SELECT ok(
 SELECT ok(
   has_column_privilege('authenticated', 'app.daily_checkins', 'acute_chronic_ratio', 'SELECT'),
   'authenticated darf acute_chronic_ratio auf daily_checkins lesen'
+);
+SELECT has_column('app', 'daily_checkins', 'checkin_submitted_at', 'daily_checkins hat checkin_submitted_at (Security-Review Fund 1)');
+SELECT ok(
+  has_column_privilege('authenticated', 'app.daily_checkins', 'checkin_submitted_at', 'SELECT'),
+  'authenticated darf checkin_submitted_at auf daily_checkins lesen'
+);
+SELECT is(
+  (SELECT numeric_precision::int FROM information_schema.columns
+    WHERE table_schema = 'app' AND table_name = 'daily_checkins' AND column_name = 'session_load'),
+  10, 'Security-Review Fund 5: daily_checkins.session_load ist numeric(10,3) (verbreitert, Tagessumme darf nicht ueberlaufen)'
+);
+
+-- -----------------------------------------------------------------------------
+-- 1b. Security-Review Fund 3 (MITTEL): NUR SELECT fuer authenticated auf
+--     beiden neuen Tabellen, kein INSERT/UPDATE mehr ueber Table-Grants --
+--     der Schreibweg laeuft ausschliesslich ueber die RPCs.
+-- -----------------------------------------------------------------------------
+SELECT ok(
+  has_table_privilege('authenticated', 'app.training_sessions', 'SELECT'),
+  'authenticated darf app.training_sessions lesen'
+);
+SELECT ok(
+  NOT has_table_privilege('authenticated', 'app.training_sessions', 'INSERT'),
+  'authenticated hat KEIN Table-Level-INSERT mehr auf app.training_sessions (Fund 3)'
+);
+SELECT ok(
+  NOT has_table_privilege('authenticated', 'app.training_sessions', 'UPDATE'),
+  'authenticated hat KEIN Table-Level-UPDATE mehr auf app.training_sessions (Fund 3)'
+);
+SELECT ok(
+  has_table_privilege('authenticated', 'app.session_rpe', 'SELECT'),
+  'authenticated darf app.session_rpe lesen'
+);
+SELECT ok(
+  NOT has_table_privilege('authenticated', 'app.session_rpe', 'INSERT'),
+  'authenticated hat KEIN Table-Level-INSERT mehr auf app.session_rpe (Fund 3)'
+);
+SELECT ok(
+  NOT has_function_privilege('authenticated', 'app._compute_daily_session_load(uuid,date)', 'EXECUTE'),
+  'authenticated darf app._compute_daily_session_load nicht direkt ausfuehren (interne Funktion)'
+);
+
+SELECT throws_ok(
+  $$INSERT INTO app.training_sessions (team_id, session_date, duration_min, created_by, goal_text)
+    VALUES ('f6000000-0000-0000-0000-000000000001', current_date, 60, NULL, repeat('x', 2001))$$,
+  NULL, NULL,
+  'Security-Review Fund 5: goal_text laenger als 2000 Zeichen wird von der CHECK-Constraint abgelehnt'
 );
 
 -- -----------------------------------------------------------------------------
@@ -132,6 +179,26 @@ SELECT throws_ok(
     VALUES ('f6000000-0000-0000-0000-000000000001', current_date, 301, 'f6100000-0000-0000-0000-000000000002')$$,
   NULL, NULL,
   'duration_min = 301 wird auch von der CHECK-Constraint auf der Tabelle selbst abgelehnt (zweite Sicherheitsebene)'
+);
+
+-- Security-Review Fund 3: dieselbe Obergrenze gilt jetzt auch direkt auf
+-- app.session_rpe (bisher KEIN CHECK dort) -- getestet gegen eine bereits
+-- existierende Einheit (Haupteinheit, oben angelegt). Als Superuser
+-- ausgefuehrt (bewusst kein SET ROLE), damit ausschliesslich die CHECK-
+-- Constraint geprueft wird, nicht das seit Fund 3 fehlende INSERT-Recht.
+SELECT throws_ok(
+  $$INSERT INTO app.session_rpe (team_id, person_id, session_id, rpe, duration_min)
+    SELECT 'f6000000-0000-0000-0000-000000000001', 'f6100000-0000-0000-0000-000000000001', ts.id, 5, -5
+      FROM app.training_sessions ts WHERE goal_text = 'Haupteinheit'$$,
+  NULL, NULL,
+  'session_rpe.duration_min = -5 wird von der CHECK-Constraint abgelehnt'
+);
+SELECT throws_ok(
+  $$INSERT INTO app.session_rpe (team_id, person_id, session_id, rpe, duration_min)
+    SELECT 'f6000000-0000-0000-0000-000000000001', 'f6100000-0000-0000-0000-000000000001', ts.id, 5, 301
+      FROM app.training_sessions ts WHERE goal_text = 'Haupteinheit'$$,
+  NULL, NULL,
+  'session_rpe.duration_min = 301 wird von der CHECK-Constraint abgelehnt (Konsistenz zu training_sessions)'
 );
 
 -- -----------------------------------------------------------------------------
@@ -338,16 +405,35 @@ SELECT is(
 );
 RESET ROLE;
 
--- Direkter INSERT als Spieler wird von der RLS-Policy abgelehnt (nur Staff
--- darf ueber die WITH-CHECK-Klausel schreiben) -- der eigentliche Schreibweg
--- ist ohnehin die SECURITY DEFINER Tuer, dies ist die zweite Sicherheitsebene.
+-- Direkter INSERT als Spieler wird abgelehnt (Security-Review Fund 3:
+-- authenticated hat seit dieser Runde gar kein Table-Level-INSERT mehr auf
+-- app.training_sessions -- die Rechtepruefung greift schon vor jeder
+-- RLS-Auswertung). Der eigentliche Schreibweg ist ohnehin die SECURITY
+-- DEFINER Tuer.
 SET ROLE authenticated;
 SELECT app._t38_jwt('f6100000-0000-0000-0000-000000000001', 'player');
 SELECT throws_ok(
   $$INSERT INTO app.training_sessions (team_id, session_date, duration_min, created_by)
     VALUES ('f6000000-0000-0000-0000-000000000001', current_date, 60, 'f6100000-0000-0000-0000-000000000001')$$,
   NULL, NULL,
-  'Direkter INSERT eines Spielers auf app.training_sessions wird von RLS abgelehnt'
+  'Direkter INSERT eines Spielers auf app.training_sessions wird abgelehnt (kein GRANT mehr, Fund 3)'
+);
+RESET ROLE;
+
+-- -----------------------------------------------------------------------------
+-- 8b. Security-Review Fund 3 (Reviewer-Vorschlag): Cross-Team-Versuch bei
+--     rpc_submit_session_rpe mit einer session_id, die zu einem ANDEREN Team
+--     gehoert -- das darf niemals ueber den Team-Lookup der eigenen Person
+--     hinaus etwas anderes Teams treffen.
+-- -----------------------------------------------------------------------------
+SET ROLE authenticated;
+SELECT app._t38_jwt('f6100000-0000-0000-0000-000000000009', 'player', 'f6000000-0000-0000-0000-000000000008');
+SELECT ok(
+  app.is_denial(app.rpc_submit_session_rpe(
+    (SELECT id FROM app.training_sessions WHERE duration_min = 100),
+    5::smallint
+  )),
+  'Spieler eines fremden Teams (F6b) darf kein RPE fuer eine session_id aus Team F6 abgeben'
 );
 RESET ROLE;
 
@@ -371,6 +457,108 @@ SELECT is(
     WHERE person_id = 'f6100000-0000-0000-0000-000000000005' AND date = current_date),
   0.000,
   'Spieler5 ohne Training: session_load ist 0, nicht NULL (Ruhetag zaehlt als 0, keine fehlende Beobachtung)'
+);
+
+-- Security-Review Fund 1 (Teil 2): die Cron-Schleife ist jetzt auf Rolle
+-- player beschraenkt -- Coach F6 (Staff) bekommt gar keine Trainingslast-
+-- Zeile vom Nachtlauf, weder session_load noch acute_chronic_ratio.
+SELECT ok(
+  NOT EXISTS (
+    SELECT 1 FROM app.daily_checkins
+     WHERE person_id = 'f6100000-0000-0000-0000-000000000002' AND date = current_date
+  ),
+  'Security-Review Fund 1: Coach (Staff) bekommt vom Nachtlauf keine daily_checkins-Zeile (Schleife nur noch Rolle player)'
+);
+
+-- -----------------------------------------------------------------------------
+-- 9b. Security-Review Fund 2 (MITTEL, Silo-Bruch bei Teamwechsel): eine
+--     bestehende daily_checkins-Zeile eines Teams darf nach einem
+--     Teamwechsel der Person NICHT vom neuen Team ueberschrieben werden --
+--     und der Aufruf darf trotzdem nicht mit einer Exception abbrechen
+--     (sonst wuerde ein einzelner Teamwechsel den gesamten Nachtlauf fuer
+--     ALLE anderen Personen mitreissen).
+-- -----------------------------------------------------------------------------
+SELECT is(
+  (SELECT team_id FROM app.daily_checkins
+    WHERE person_id = 'f6100000-0000-0000-0000-000000000005' AND date = current_date),
+  'f6000000-0000-0000-0000-000000000001'::uuid,
+  'Vorbedingung: Spieler5s heutige Zeile gehoert noch Team F6'
+);
+
+UPDATE app.persons SET team_id = 'f6000000-0000-0000-0000-000000000008'
+ WHERE id = 'f6100000-0000-0000-0000-000000000005';
+
+SELECT lives_ok(
+  $$SELECT app._compute_daily_session_load('f6100000-0000-0000-0000-000000000005', current_date)$$,
+  'Aufruf nach simuliertem Teamwechsel laeuft ohne Exception (kein Abbruch des Cron-Laufs fuer andere Personen)'
+);
+
+SELECT is(
+  (SELECT team_id FROM app.daily_checkins
+    WHERE person_id = 'f6100000-0000-0000-0000-000000000005' AND date = current_date),
+  'f6000000-0000-0000-0000-000000000001'::uuid,
+  'Fund 2: die bestehende Zeile bleibt beim ALTEN Team F6 -- kein Ueberschreiben mit dem neuen Team F6b'
+);
+SELECT is(
+  (SELECT count(*)::int FROM app.daily_checkins
+    WHERE person_id = 'f6100000-0000-0000-0000-000000000005' AND date = current_date),
+  1, 'Fund 2: es entsteht keine zweite Zeile fuer das neue Team (unique ist auf person_id+date, nicht team_id)'
+);
+
+UPDATE app.persons SET team_id = 'f6000000-0000-0000-0000-000000000001'
+ WHERE id = 'f6100000-0000-0000-0000-000000000005';
+
+-- -----------------------------------------------------------------------------
+-- 9c. Security-Review Fund 1 (HOCH): hasCheckIn bleibt false nach dem
+--     Trainingslast-Nachtlauf, solange keine echte rpc_submit_checkin
+--     stattgefunden hat. Positivkontrolle: nach einem echten Check-in wird
+--     hasCheckIn true.
+-- -----------------------------------------------------------------------------
+SET ROLE authenticated;
+SELECT app._t38_jwt('f6100000-0000-0000-0000-000000000002', 'coach');
+SELECT is(
+  (SELECT (m -> 'hasCheckIn')::boolean FROM jsonb_array_elements(app.rpc_morning_ops() -> 'members') m
+    WHERE m #>> '{player,id}' = 'f6100000-0000-0000-0000-000000000001'),
+  false,
+  'Fund 1: Spieler1 hat Trainingslast (aus RPE) aber KEINEN echten Check-in -> hasCheckIn bleibt false'
+);
+SELECT is(
+  (SELECT (m -> 'hasCheckIn')::boolean FROM jsonb_array_elements(app.rpc_morning_ops() -> 'members') m
+    WHERE m #>> '{player,id}' = 'f6100000-0000-0000-0000-000000000005'),
+  false,
+  'Fund 1: Spieler5 hat nur eine vom Nachtlauf angelegte Zeile (session_load=0) -> hasCheckIn bleibt false'
+);
+RESET ROLE;
+
+SET ROLE authenticated;
+SELECT app._t38_jwt('f6100000-0000-0000-0000-000000000003', 'player');
+SELECT lives_ok(
+  $$SELECT app.rpc_submit_checkin(current_date, 480, 8, 7, 6, 3, 8, 7, 8, NULL)$$,
+  'Positivkontrolle: Spieler3 gibt einen echten Wellness-Check-in ab'
+);
+RESET ROLE;
+
+SET ROLE authenticated;
+SELECT app._t38_jwt('f6100000-0000-0000-0000-000000000002', 'coach');
+SELECT is(
+  (SELECT (m -> 'hasCheckIn')::boolean FROM jsonb_array_elements(app.rpc_morning_ops() -> 'members') m
+    WHERE m #>> '{player,id}' = 'f6100000-0000-0000-0000-000000000003'),
+  true,
+  'Positivkontrolle: nach echtem rpc_submit_checkin ist hasCheckIn fuer Spieler3 true'
+);
+RESET ROLE;
+
+SELECT is(
+  (SELECT checkin_submitted_at IS NOT NULL FROM app.daily_checkins
+    WHERE person_id = 'f6100000-0000-0000-0000-000000000003' AND date = current_date),
+  true,
+  'rpc_submit_checkin setzt checkin_submitted_at'
+);
+SELECT is(
+  (SELECT checkin_submitted_at FROM app.daily_checkins
+    WHERE person_id = 'f6100000-0000-0000-0000-000000000001' AND date = current_date),
+  NULL,
+  'app._compute_daily_session_load setzt checkin_submitted_at niemals (Spieler1 hat trotz mehrfacher RPE-Abgabe weiterhin NULL)'
 );
 
 -- -----------------------------------------------------------------------------

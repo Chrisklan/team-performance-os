@@ -43,6 +43,15 @@
 -- bereits seed, direction='neutral', hier NICHT neu angelegt). Idempotent
 -- (DROP ... IF EXISTS, CREATE OR REPLACE wo der Rueckgabetyp gleich bleibt).
 -- Tests: backend/38_training_load.pgtap.sql.
+--
+-- Security-Review (2026-09-27, zwei Runden auf Commits f7353a4/ed04ff8) --
+-- Fund 4 NICHT in diesem Paket behoben (needs_decision an Chris, ausserhalb
+-- des Scopes): Spieler:innen koennen ueber die bestehende Policy
+-- daily_checkins_select_team (backend/09_rpcs.sql) die Last/ACWR von
+-- Mitspieler:innen lesen, obwohl die RPE-Rohdaten selbst (app.session_rpe)
+-- korrekt gesperrt sind. Das ist eine Fachentscheidung, die ueber AP-68
+-- hinausgeht (betrifft gleichermassen die bestehenden Schlaf-/Mentalwerte-
+-- Spalten auf derselben Tabelle/Policy) -- nicht in dieser Migration geloest.
 -- =============================================================================
 
 -- -----------------------------------------------------------------------------
@@ -71,6 +80,20 @@ EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 --     ist grosszuegig ueber jeder realistischen Trainingseinheit oder einem
 --     Ganztagslehrgang, macht aber rpe*duration_min <= 3000 (weit unter dem
 --     numeric(8,3)-Limit) strukturell unmoeglich zu ueberschreiten.
+-- Security-Review zu Commit ed04ff8 (2026-09-27), Fund 3: der Kopfkommentar
+-- dieser Migration behauptet "Schreibweg laeuft ausschliesslich ueber die
+-- SECURITY DEFINER Tueren" -- das stimmte technisch nicht: authenticated
+-- hatte weiterhin volles Table-Level INSERT/UPDATE. Die RLS-Policies unten
+-- pruefen zudem deutlich weniger als die RPCs (kein Zeitfenster, keine
+-- Rollenpruefung bei INSERT, created_by/created_at beliebig umschreibbar
+-- per UPDATE). Jetzt technisch wahr: NUR NOCH GRANT SELECT fuer
+-- authenticated, kein INSERT/UPDATE ueber Table-Grants mehr moeglich (die
+-- Policies unten bleiben als dokumentierte Absicht stehen, greifen aber erst,
+-- falls ein GRANT je wieder grosszuegiger wird -- ohne GRANT werden INSERT/
+-- UPDATE bereits an der Rechteprüfung abgewiesen, bevor RLS ueberhaupt
+-- auswertet). Der einzige Schreibweg ist damit wirklich nur noch die
+-- SECURITY DEFINER Tuer (Function-Owner ist Superuser, umgeht Tabellenrechte
+-- wie ueberall im Projekt).
 CREATE TABLE IF NOT EXISTS app.training_sessions (
   id                 uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   team_id            uuid NOT NULL REFERENCES app.teams(id) ON DELETE CASCADE,
@@ -79,7 +102,7 @@ CREATE TABLE IF NOT EXISTS app.training_sessions (
   duration_min       smallint NOT NULL CHECK (duration_min > 0 AND duration_min <= 300),
   session_type       app.app_session_type NOT NULL DEFAULT 'field',
   planned_intensity  smallint CHECK (planned_intensity BETWEEN 1 AND 10),
-  goal_text          text,
+  goal_text          text CHECK (char_length(goal_text) <= 2000),
   created_by         uuid REFERENCES app.persons(id) ON DELETE SET NULL,
   created_at         timestamptz NOT NULL DEFAULT now(),
   updated_at         timestamptz NOT NULL DEFAULT now()
@@ -87,16 +110,27 @@ CREATE TABLE IF NOT EXISTS app.training_sessions (
 CREATE INDEX IF NOT EXISTS training_sessions_team_date_idx
   ON app.training_sessions (team_id, session_date DESC);
 
+COMMENT ON COLUMN app.training_sessions.created_by IS
+  'NULL = anlegende Person geloescht (ON DELETE SET NULL) -- die Einheit selbst bleibt als Historie erhalten.';
+
 ALTER TABLE app.training_sessions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE app.training_sessions FORCE ROW LEVEL SECURITY;
 
-GRANT SELECT, INSERT, UPDATE ON app.training_sessions TO authenticated;
+-- NUR SELECT: der Schreibweg (INSERT/UPDATE) laeuft ausschliesslich ueber
+-- rpc_create_training_session/rpc_update_training_session (Security-Review
+-- Fund 3, siehe Kopfkommentar oben).
+GRANT SELECT ON app.training_sessions TO authenticated;
+REVOKE INSERT, UPDATE, DELETE ON app.training_sessions FROM authenticated;
 
 DROP POLICY IF EXISTS training_sessions_select_team ON app.training_sessions;
 CREATE POLICY training_sessions_select_team ON app.training_sessions
   FOR SELECT TO authenticated
   USING (team_id = app.auth_team_id());
 
+-- Die folgenden zwei Policies greifen aktuell nie (kein INSERT/UPDATE-GRANT
+-- fuer authenticated mehr) -- sie bleiben als dokumentierte, korrekte
+-- Absicht stehen, falls ein GRANT je wieder erteilt wird, statt dass diese
+-- Absicht verloren ginge.
 DROP POLICY IF EXISTS training_sessions_insert_staff ON app.training_sessions;
 CREATE POLICY training_sessions_insert_staff ON app.training_sessions
   FOR INSERT TO authenticated
@@ -120,14 +154,22 @@ CREATE POLICY training_sessions_update_staff ON app.training_sessions
 -- geplanten Dauer darf die Last eines bereits abgegebenen RPE-Eintrags nicht
 -- rueckwirkend veraendern.
 
+-- Security-Review zu Commit ed04ff8 (2026-09-27), Fund 3: duration_min hatte
+-- HIER (anders als auf training_sessions) noch KEIN CHECK -- ein direkter
+-- INSERT mit negativem oder beliebig hohem duration_min waere durchgegangen
+-- und haette (bei ausreichend Zeilen desselben Tages) denselben numeric-
+-- Overflow-Bug reproduziert, der schon einmal gefixt wurde. session_load
+-- selbst ist generiert (rpe*duration_min), das CHECK >= 0 ist trotzdem eine
+-- explizite Invariante, kein Fehler heute erzeugbar (rpe/duration_min sind
+-- beide > 0), aber falls die generierte Formel je erweitert wird.
 CREATE TABLE IF NOT EXISTS app.session_rpe (
   id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   team_id       uuid NOT NULL REFERENCES app.teams(id) ON DELETE CASCADE,
   person_id     uuid NOT NULL REFERENCES app.persons(id) ON DELETE CASCADE,
   session_id    uuid NOT NULL REFERENCES app.training_sessions(id) ON DELETE CASCADE,
   rpe           smallint NOT NULL CHECK (rpe BETWEEN 1 AND 10),
-  duration_min  smallint NOT NULL,
-  session_load  numeric(8,3) GENERATED ALWAYS AS (rpe * duration_min) STORED,
+  duration_min  smallint NOT NULL CHECK (duration_min BETWEEN 1 AND 300),
+  session_load  numeric(8,3) GENERATED ALWAYS AS (rpe * duration_min) STORED CHECK (session_load >= 0),
   submitted_at  timestamptz NOT NULL DEFAULT now(),
   UNIQUE (person_id, session_id)
 );
@@ -135,9 +177,14 @@ CREATE TABLE IF NOT EXISTS app.session_rpe (
 ALTER TABLE app.session_rpe ENABLE ROW LEVEL SECURITY;
 ALTER TABLE app.session_rpe FORCE ROW LEVEL SECURITY;
 
--- RPE ist kein medizinisches Feld, kein Medizin-Gate (Modul-Spec): Staff darf
--- es sehen, sobald es existiert, ohne released-Zwischenschritt.
-GRANT SELECT, INSERT ON app.session_rpe TO authenticated;
+-- NUR SELECT: der Schreibweg (INSERT/Upsert) laeuft ausschliesslich ueber
+-- rpc_submit_session_rpe (Security-Review Fund 3). Die bisherige INSERT-
+-- Policy pruefte nur person_id/team_id, NICHT dass session_id zum eigenen
+-- Team gehoert, NICHT das Zeitfenster, NICHT die Rolle player -- ein direkter
+-- INSERT haette all das umgehen koennen. Ohne GRANT ist das strukturell
+-- ausgeschlossen, nicht nur durch eine (luckenhafte) Policy.
+GRANT SELECT ON app.session_rpe TO authenticated;
+REVOKE INSERT, UPDATE, DELETE ON app.session_rpe FROM authenticated;
 
 DROP POLICY IF EXISTS session_rpe_select_visible ON app.session_rpe;
 CREATE POLICY session_rpe_select_visible ON app.session_rpe
@@ -147,6 +194,8 @@ CREATE POLICY session_rpe_select_visible ON app.session_rpe
     AND (person_id = app.auth_person_id() OR app.auth_is_staff() OR app.auth_is_medical())
   );
 
+-- Bleibt als dokumentierte Absicht stehen (greift aktuell nie, kein INSERT-
+-- GRANT mehr), falls ein GRANT je wieder erteilt wird -- siehe Kommentar oben.
 DROP POLICY IF EXISTS session_rpe_insert_self ON app.session_rpe;
 CREATE POLICY session_rpe_insert_self ON app.session_rpe
   FOR INSERT TO authenticated
@@ -166,14 +215,41 @@ CREATE POLICY session_rpe_insert_self ON app.session_rpe
 -- Freigabe, entzieht keine zuvor gewaehrten Spalten) -- die vorhandene Liste
 -- aus backend/09_rpcs.sql bleibt unveraendert bestehen, hier nur ergaenzt.
 
+-- Security-Review zu Commit ed04ff8 (2026-09-27), Fund 1 (HOCH): app.
+-- cron_training_load legt/aktualisiert ueber _compute_daily_session_load
+-- fuer JEDE aktive Person eine daily_checkins-Zeile ("kein Training -> 0,
+-- nicht NULL"). app.rpc_morning_ops (siehe unten, Abschnitt 12) hat
+-- hasCheckIn bisher als reine Zeilen-EXISTS-Pruefung berechnet -- ab dem
+-- Nachtlauf 02:30 hätte das Trainer-Dashboard fuer JEDE Person "Check-in
+-- vorhanden" gemeldet, auch ohne echten Wellness-Check-in. checkin_
+-- submitted_at ist die Entkopplung: NUR app.rpc_submit_checkin (Abschnitt
+-- 11 unten) setzt sie, _compute_daily_session_load fasst sie nie an (weder
+-- INSERT noch UPDATE), hasCheckIn prueft ab jetzt checkin_submitted_at IS
+-- NOT NULL statt Zeilen-Existenz.
+--
+-- Fund 5 (NIEDRIG): session_load war numeric(8,3) (5 Vorkommastellen) --
+-- die Tagessumme in _compute_daily_session_load kann ab ca. 34 Einheiten an
+-- einem Tag ueberlaufen und haette den GESAMTEN Nachtlauf fuer ALLE Personen
+-- abgebrochen (eine Transaktion). numeric(10,3) macht das strukturell
+-- unmoeglich (7 Vorkommastellen, weit über jeder realistischen Tagessumme).
 ALTER TABLE app.daily_checkins
-  ADD COLUMN IF NOT EXISTS session_load        numeric(8,3),
-  ADD COLUMN IF NOT EXISTS acute_chronic_ratio  numeric(6,3);
+  ADD COLUMN IF NOT EXISTS session_load         numeric(10,3),
+  ADD COLUMN IF NOT EXISTS acute_chronic_ratio   numeric(6,3),
+  ADD COLUMN IF NOT EXISTS checkin_submitted_at  timestamptz;
+
+ALTER TABLE app.daily_checkins
+  ALTER COLUMN session_load TYPE numeric(10,3);
+
+COMMENT ON COLUMN app.daily_checkins.checkin_submitted_at IS
+  'Wird AUSSCHLIESSLICH von app.rpc_submit_checkin gesetzt (echter Wellness-Check-in). '
+  'app._compute_daily_session_load setzt sie NIEMALS -- eine Zeile, die nur durch den '
+  'Trainingslast-Nachtlauf entstand, hat checkin_submitted_at = NULL. hasCheckIn in '
+  'app.rpc_morning_ops prueft checkin_submitted_at IS NOT NULL, nicht Zeilen-Existenz.';
 
 GRANT SELECT (id, team_id, person_id, date, sleep_duration_min, sleep_quality,
               recovery, energy, mental_stress, mental_mood, mental_motivation,
               training_readiness, session_load, acute_chronic_ratio,
-              submitted_at, created_at, updated_at)
+              checkin_submitted_at, submitted_at, created_at, updated_at)
   ON app.daily_checkins TO authenticated;
 
 -- -----------------------------------------------------------------------------
@@ -185,7 +261,27 @@ GRANT SELECT (id, team_id, person_id, date, sleep_duration_min, sleep_quality,
 -- ein Ruhetag ist echte, gezaehlte Last-Information fuer die 7/28-Tage-
 -- Mittel weiter unten (app.cron_training_load), nicht "keine Beobachtung".
 -- Upsert legt bei Bedarf eine daily_checkins-Zeile nur mit team_id/person_id/
--- date/session_load an (Rest NULL), analog zum Upsert in rpc_submit_checkin.
+-- date/session_load an (Rest NULL, INSBESONDERE checkin_submitted_at bleibt
+-- immer unberuehrt -- siehe Kommentar auf der Spalte oben), analog zum
+-- Upsert in rpc_submit_checkin.
+--
+-- Security-Review zu Commit ed04ff8 (2026-09-27), Fund 2 (MITTEL, Silo-Bruch
+-- bei Teamwechsel): die Summenabfrage filterte NICHT auf team_id, und der
+-- Upsert hatte nicht die Team-Absicherung, die rpc_submit_checkin bereits
+-- hat (11_checkin_submit.sql/20_denial_answer.sql: "WHERE app.daily_checkins.
+-- team_id = EXCLUDED.team_id"). Nach einem Teamwechsel einer Person haette
+-- Last des NEUEN Teams in eine Zeile des ALTEN Teams geschrieben werden
+-- koennen (und umgekehrt), lesbar fuer das falsche Team-Staff. Jetzt: die
+-- Summe zaehlt nur RPE-Zeilen desselben Teams, und der Upsert schreibt nur,
+-- wenn die (ggf. bestehende) Zeile zum aktuellen Team der Person passt.
+-- Anders als rpc_submit_checkin (RAISE bei Nichttreffer) wird hier NICHT
+-- geworfen: diese Funktion laeuft in app.cron_training_load ueber ALLE
+-- aktiven Personen in EINER Transaktion -- ein RAISE fuer eine einzelne
+-- Person wuerde den gesamten Nachtlauf fuer alle anderen Personen
+-- mitabbrechen. Ein Nichttreffer ist hier zudem kein Angriffsversuch
+-- (anders als beim direkten rpc_submit_checkin-Aufruf einer Person), sondern
+-- ein legitimer Randfall (Teamwechsel) -- sicheres Verhalten ist stilles
+-- Ueberspringen (kein Schreiben in die falsche Team-Zeile), nicht Abbruch.
 
 CREATE OR REPLACE FUNCTION app._compute_daily_session_load(p_person_id uuid, p_date date)
 RETURNS numeric
@@ -195,8 +291,9 @@ SECURITY DEFINER
 SET search_path = app, pg_temp
 AS $$
 DECLARE
-  v_team_id uuid;
-  v_load    numeric(8,3);
+  v_team_id  uuid;
+  v_load     numeric(10,3);
+  v_row_id   uuid;
 BEGIN
   SELECT team_id INTO v_team_id FROM app.persons WHERE id = p_person_id;
 
@@ -204,18 +301,29 @@ BEGIN
     RETURN NULL;
   END IF;
 
-  SELECT COALESCE(sum(sr.session_load), 0)::numeric(8,3)
+  SELECT COALESCE(sum(sr.session_load), 0)::numeric(10,3)
     INTO v_load
     FROM app.session_rpe sr
     JOIN app.training_sessions ts ON ts.id = sr.session_id
    WHERE sr.person_id = p_person_id
+     AND sr.team_id = v_team_id
      AND ts.session_date = p_date;
 
   INSERT INTO app.daily_checkins (team_id, person_id, date, session_load)
   VALUES (v_team_id, p_person_id, p_date, v_load)
   ON CONFLICT (person_id, date) DO UPDATE SET
     session_load = EXCLUDED.session_load,
-    updated_at   = now();
+    updated_at   = now()
+  WHERE app.daily_checkins.team_id = EXCLUDED.team_id
+  RETURNING id INTO v_row_id;
+
+  IF v_row_id IS NULL THEN
+    -- Team-Mismatch (Silo-Schutz, Fund 2): eine bestehende Zeile gehoert
+    -- einem anderen Team als dem aktuellen Team der Person (z.B. nach einem
+    -- Teamwechsel) -- kein Schreiben, kein Fehler, kein Abbruch des
+    -- Cron-Laufs fuer andere Personen.
+    RETURN NULL;
+  END IF;
 
   RETURN v_load;
 END;
@@ -476,6 +584,324 @@ REVOKE EXECUTE ON FUNCTION app.rpc_submit_session_rpe(uuid, smallint) FROM PUBLI
 GRANT  EXECUTE ON FUNCTION app.rpc_submit_session_rpe(uuid, smallint) TO authenticated;
 
 -- -----------------------------------------------------------------------------
+-- 9b. Security-Review Fund 1 (HOCH): app.rpc_submit_checkin und app.
+--     rpc_morning_ops muessen an checkin_submitted_at angeschlossen werden.
+-- -----------------------------------------------------------------------------
+-- app.rpc_submit_checkin ist die einzige Stelle, die einen ECHTEN Wellness-
+-- Check-in entgegennimmt (ADR-016). Body identisch zur zuletzt gueltigen
+-- Fassung (backend/20_denial_answer.sql) -- CREATE OR REPLACE, NICHT DROP+
+-- CREATE, damit Signatur/Rueckgabetyp (jsonb, AP-45d) unveraendert bleiben
+-- und keine abhaengige Tuer erneut angelegt werden muss. Einzige Aenderung:
+-- checkin_submitted_at wird beim INSERT UND beim ON CONFLICT DO UPDATE
+-- gesetzt. app._compute_daily_session_load (Abschnitt 5 oben) setzt diese
+-- Spalte NIEMALS -- das ist die eigentliche Entkopplung.
+
+CREATE OR REPLACE FUNCTION app.rpc_submit_checkin(
+  p_date                date,
+  p_sleep_duration_min  numeric DEFAULT NULL,
+  p_sleep_quality       integer DEFAULT NULL,
+  p_recovery            integer DEFAULT NULL,
+  p_energy              integer DEFAULT NULL,
+  p_mental_stress       integer DEFAULT NULL,
+  p_mental_mood         integer DEFAULT NULL,
+  p_mental_motivation   integer DEFAULT NULL,
+  p_training_readiness  integer DEFAULT NULL,
+  p_body_map            jsonb   DEFAULT NULL
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path = app, pg_temp
+AS $$
+DECLARE
+  v_person_id  uuid;
+  v_team_id    uuid;
+  v_pain_max   smallint;
+  v_id         uuid;
+  v_score      numeric;
+BEGIN
+  IF NOT app.auth_has_role('player') THEN
+    RETURN app.deny('daily_checkins.submit', 'FORBIDDEN: daily_checkins.submit');
+  END IF;
+
+  v_person_id := app.auth_person_id();
+  v_team_id := app.auth_team_id();
+
+  IF p_date IS NULL OR p_date > current_date OR p_date < current_date - 2 THEN
+    RAISE EXCEPTION 'FORBIDDEN: daily_checkins.date' USING errcode = '42501';
+  END IF;
+
+  IF p_body_map IS NOT NULL THEN
+    IF jsonb_typeof(p_body_map) <> 'array' THEN
+      RAISE EXCEPTION 'INVALID: daily_checkins.body_map' USING errcode = '22023';
+    END IF;
+
+    IF EXISTS (
+      SELECT 1
+      FROM jsonb_array_elements(p_body_map) e
+      WHERE jsonb_typeof(e) <> 'object'
+         OR jsonb_typeof(e -> 'region') IS DISTINCT FROM 'string'
+         OR (e ? 'pain' AND jsonb_typeof(e -> 'pain') NOT IN ('number', 'null'))
+         OR (jsonb_typeof(e -> 'pain') = 'number' AND (e ->> 'pain')::numeric NOT BETWEEN 0 AND 10)
+    ) THEN
+      RAISE EXCEPTION 'INVALID: daily_checkins.body_map' USING errcode = '22023';
+    END IF;
+
+    IF EXISTS (
+      SELECT 1
+      FROM jsonb_array_elements(p_body_map) e
+      WHERE NOT EXISTS (
+        SELECT 1
+        FROM app.body_region br
+        WHERE br.key = e ->> 'region'
+          AND (br.active_to IS NULL OR br.active_to > p_date)
+      )
+    ) THEN
+      RAISE EXCEPTION 'INVALID: daily_checkins.body_map.region' USING errcode = '22023';
+    END IF;
+
+    IF EXISTS (
+      SELECT 1
+      FROM jsonb_array_elements(p_body_map) e
+      WHERE e ? 'point'
+        AND jsonb_typeof(e -> 'point') <> 'null'
+        AND (
+             jsonb_typeof(e -> 'point') <> 'array'
+          OR jsonb_array_length(e -> 'point') <> 2
+          OR EXISTS (
+               SELECT 1
+               FROM jsonb_array_elements(e -> 'point') c
+               WHERE jsonb_typeof(c) <> 'number'
+                  OR (c #>> '{}')::numeric NOT BETWEEN 0 AND 1
+             )
+        )
+    ) THEN
+      RAISE EXCEPTION 'INVALID: daily_checkins.body_map.point' USING errcode = '22023';
+    END IF;
+
+    IF EXISTS (
+      SELECT 1
+      FROM jsonb_array_elements(p_body_map) e
+      WHERE e ? 'svg'
+        AND jsonb_typeof(e -> 'svg') <> 'null'
+        AND (
+             jsonb_typeof(e -> 'svg') <> 'string'
+          OR (e ->> 'svg') !~ '^[a-z_]+@[0-9]+$'
+          OR NOT EXISTS (
+               SELECT 1
+               FROM app.body_figure_variant v
+               WHERE v.key = split_part(e ->> 'svg', '@', 1)
+             )
+        )
+    ) THEN
+      RAISE EXCEPTION 'INVALID: daily_checkins.body_map.svg' USING errcode = '22023';
+    END IF;
+
+    IF EXISTS (
+      SELECT 1
+      FROM jsonb_array_elements(p_body_map) e
+      WHERE e ? 'point'
+        AND jsonb_typeof(e -> 'point') <> 'null'
+        AND (NOT e ? 'svg' OR jsonb_typeof(e -> 'svg') = 'null')
+    ) THEN
+      RAISE EXCEPTION 'INVALID: daily_checkins.body_map.svg' USING errcode = '22023';
+    END IF;
+
+    SELECT max((e ->> 'pain')::numeric)::smallint
+    INTO v_pain_max
+    FROM jsonb_array_elements(p_body_map) e
+    WHERE jsonb_typeof(e -> 'pain') = 'number';
+  END IF;
+
+  INSERT INTO app.daily_checkins (
+    team_id, person_id, date, sleep_duration_min, sleep_quality, recovery,
+    energy, mental_stress, mental_mood, mental_motivation, training_readiness,
+    body_map, pain_max, submitted_at, checkin_submitted_at
+  )
+  VALUES (
+    v_team_id, v_person_id, p_date, p_sleep_duration_min, p_sleep_quality, p_recovery,
+    p_energy, p_mental_stress, p_mental_mood, p_mental_motivation, p_training_readiness,
+    p_body_map, v_pain_max, now(), now()
+  )
+  ON CONFLICT (person_id, date) DO UPDATE SET
+    sleep_duration_min   = EXCLUDED.sleep_duration_min,
+    sleep_quality        = EXCLUDED.sleep_quality,
+    recovery             = EXCLUDED.recovery,
+    energy               = EXCLUDED.energy,
+    mental_stress        = EXCLUDED.mental_stress,
+    mental_mood          = EXCLUDED.mental_mood,
+    mental_motivation    = EXCLUDED.mental_motivation,
+    training_readiness   = EXCLUDED.training_readiness,
+    body_map             = EXCLUDED.body_map,
+    pain_max             = EXCLUDED.pain_max,
+    submitted_at         = EXCLUDED.submitted_at,
+    checkin_submitted_at = EXCLUDED.checkin_submitted_at,
+    updated_at           = now()
+  WHERE app.daily_checkins.team_id = EXCLUDED.team_id
+  RETURNING id INTO v_id;
+
+  IF v_id IS NULL THEN
+    RAISE EXCEPTION 'FORBIDDEN: daily_checkins.team' USING errcode = '42501';
+  END IF;
+
+  v_score := round((
+      coalesce(p_sleep_quality, 5) +
+      coalesce(p_recovery, 5) +
+      coalesce(p_mental_mood, 5) +
+      coalesce(p_mental_motivation, 5) +
+      (10 - coalesce(p_mental_stress, 5))
+    ) / 5.0, 2);
+
+  INSERT INTO app.readiness_scores (team_id, person_id, date, score_total, band, factors, computed_at)
+  VALUES (
+    v_team_id, v_person_id, p_date, v_score,
+    CASE WHEN v_score >= 7 THEN 'high'::app.app_readiness_band
+         WHEN v_score >= 5 THEN 'moderate'::app.app_readiness_band
+         ELSE 'low'::app.app_readiness_band END,
+    jsonb_build_object(
+      'sleep_quality', p_sleep_quality,
+      'recovery', p_recovery,
+      'mental_mood', p_mental_mood,
+      'mental_motivation', p_mental_motivation,
+      'mental_stress', p_mental_stress,
+      'training_readiness', p_training_readiness
+    ),
+    now()
+  )
+  ON CONFLICT (person_id, date) DO UPDATE SET
+    score_total = EXCLUDED.score_total,
+    band        = EXCLUDED.band,
+    factors     = EXCLUDED.factors,
+    computed_at = EXCLUDED.computed_at;
+
+  RETURN to_jsonb(v_id);
+END;
+$$;
+
+COMMENT ON FUNCTION app.rpc_submit_checkin(date, numeric, integer, integer, integer, integer, integer, integer, integer, jsonb) IS
+  'ADR-016: only write path for player check-ins. Player role with DB-confirmed claims, person/team from auth helpers, date today or up to 2 days back, upsert per (person_id, date), body_map jsonb array with pain_max, readiness score in the same call. No free text. '
+  'AP-43: region checked against app.body_region, optional tap point (two numbers 0 to 1, '
+  'normalised to the silhouette viewBox) and optional figure svg as <variant>@<version>, '
+  'variant checked against app.body_figure_variant. pain_max still reads pain only. '
+  'AP-45d: returns jsonb. On success to_jsonb(id), on denial the error object from app.deny. '
+  'AP-68 Security-Review Fund 1: setzt checkin_submitted_at (einziger Ort im System, der das tut) -- '
+  'das trennt einen echten Wellness-Check-in von einer Zeile, die nur der Trainingslast-Nachtlauf angelegt hat.';
+
+REVOKE EXECUTE ON FUNCTION app.rpc_submit_checkin(date, numeric, integer, integer, integer, integer, integer, integer, integer, jsonb) FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION app.rpc_submit_checkin(date, numeric, integer, integer, integer, integer, integer, integer, integer, jsonb) FROM anon;
+GRANT  EXECUTE ON FUNCTION app.rpc_submit_checkin(date, numeric, integer, integer, integer, integer, integer, integer, integer, jsonb) TO authenticated;
+
+-- app.rpc_morning_ops: Body identisch zur zuletzt gueltigen Fassung
+-- (backend/08_dashboard_migration.sql, Bridge Punkt 67/2026-09-24) --
+-- CREATE OR REPLACE, Signatur/Rueckgabetyp unveraendert. Einzige Aenderung:
+-- hasCheckIn prueft jetzt checkin_submitted_at IS NOT NULL statt reiner
+-- Zeilen-Existenz (Fund 1).
+
+CREATE OR REPLACE FUNCTION app.rpc_morning_ops()
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = app, public, auth, pg_temp
+AS $$
+DECLARE
+  v_team_id    uuid;
+  v_kader_name text;
+  v_members    jsonb;
+BEGIN
+  IF NOT app.auth_is_staff() THEN
+    RAISE EXCEPTION 'FORBIDDEN' USING ERRCODE = '42501';
+  END IF;
+
+  v_team_id := app.auth_team_id();
+
+  SELECT t.name INTO v_kader_name
+  FROM app.teams t
+  WHERE t.id = v_team_id;
+
+  SELECT coalesce(jsonb_agg(m.member ORDER BY m.jersey), '[]'::jsonb)
+  INTO v_members
+  FROM (
+    SELECT
+      coalesce(ap.shirt_number, 0) AS jersey,
+      jsonb_build_object(
+        'player', jsonb_build_object(
+          'id', ap.id,
+          'jersey', coalesce(ap.shirt_number, 0),
+          'name', coalesce(ap.display_name, ''),
+          'position', coalesce(ap.person_position, '')
+        ),
+        -- Nur das Band. KEIN score_total, KEINE factors: siehe Kopf von
+        -- 08_dashboard_migration.sql.
+        'readiness', jsonb_build_object(
+          'band', rs.band
+        ),
+        'baseline', jsonb_build_object(
+          'series', '[]'::jsonb,
+          'rollingAvg', 0
+        ),
+        'medicalStatus', coalesce(mc.clearance_mapped, 'green'),
+        'medicalClearance', mc.clearance_mapped,
+        'attendance', 'anwesend',
+        'todayEvent', 'none',
+        -- Fund 1 (Security-Review 2026-09-27): echtes Feld statt Zeilen-
+        -- Existenz, siehe Kommentar auf app.daily_checkins.checkin_submitted_at.
+        'hasCheckIn', EXISTS (
+          SELECT 1 FROM app.daily_checkins dc
+           WHERE dc.person_id = ap.id AND dc.date = current_date
+             AND dc.checkin_submitted_at IS NOT NULL
+        )
+      ) AS member
+    FROM app.persons ap
+    LEFT JOIN app.readiness_scores rs
+      ON rs.person_id = ap.id AND rs.date = current_date
+    LEFT JOIN LATERAL (
+      SELECT CASE mcl.status
+               WHEN 'full'       THEN 'frei'
+               WHEN 'limited'    THEN 'eingeschraenkt'
+               WHEN 'individual' THEN 'eingeschraenkt'
+               WHEN 'blocked'    THEN 'gesperrt'
+             END AS clearance_mapped
+      FROM app.medical_clearances mcl
+      WHERE mcl.person_id = ap.id
+        AND mcl.valid_from <= now()
+        AND (mcl.valid_to IS NULL OR mcl.valid_to > now())
+      ORDER BY mcl.valid_from DESC
+      LIMIT 1
+    ) mc ON true
+    WHERE ap.team_id = v_team_id
+      AND ap.is_active = true
+      AND EXISTS (
+        SELECT 1
+          FROM app.role_assignments ra
+         WHERE ra.person_id = ap.id
+           AND ra.team_id   = ap.team_id
+           AND ra.role      = 'player'
+           AND ra.valid_from <= now()
+           AND (ra.valid_to IS NULL OR ra.valid_to > now())
+      )
+  ) m;
+
+  RETURN jsonb_build_object(
+    'kaderName', coalesce(v_kader_name, ''),
+    'syncState', 'live',
+    'asOf', to_char(current_date, 'YYYY-MM-DD'),
+    'members', v_members
+  );
+END;
+$$;
+
+COMMENT ON FUNCTION app.rpc_morning_ops() IS
+  'Trainer-Kader-Payload. AP-68 Security-Review Fund 1: hasCheckIn prueft checkin_submitted_at '
+  'IS NOT NULL statt Zeilen-Existenz auf app.daily_checkins (sonst meldet der Trainingslast-'
+  'Nachtlauf faelschlich jeden Tag einen Check-in fuer jede Person). Sonst unveraendert zur '
+  'Fassung aus backend/08_dashboard_migration.sql (Bridge Punkt 67).';
+
+REVOKE EXECUTE ON FUNCTION app.rpc_morning_ops() FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION app.rpc_morning_ops() FROM anon;
+GRANT EXECUTE ON FUNCTION app.rpc_morning_ops() TO authenticated, service_role;
+
+-- -----------------------------------------------------------------------------
 -- 10. Die Tueren in public
 -- -----------------------------------------------------------------------------
 
@@ -557,6 +983,15 @@ GRANT EXECUTE ON FUNCTION public.rpc_submit_session_rpe(uuid, smallint) TO authe
 -- oder NULL -> ratio NULL, kein Fehler, keine Division-durch-Null-Exception
 -- (COALESCE/NULLIF-frei durch CASE, expliziter als NULLIF(chronic,0) fuer
 -- die Lesbarkeit im Test).
+--
+-- Security-Review zu Commit ed04ff8 (2026-09-27), Fund 1 (Teil 2): die
+-- Schleife lief ueber JEDE aktive Person, auch Coach/Physio/Arzt/Admin --
+-- die legen nie eine RPE ab und brauchen keine Trainingslast-Zeile. Auf
+-- Rolle player beschraenkt (dasselbe EXISTS-Praedikat wie app.rpc_
+-- morning_ops/app.rpc_list_team_members, Bridge Punkt 67): das schliesst
+-- einen Teil des hasCheckIn-Problems zusaetzlich ab (Staff bekommt gar
+-- keine Zeile mehr vom Nachtlauf) und ist fachlich korrekt (Last ergibt fuer
+-- Nicht-Spieler:innen kein Konzept).
 
 CREATE OR REPLACE FUNCTION app.cron_training_load()
 RETURNS void
@@ -571,11 +1006,29 @@ DECLARE
   v_chronic numeric;
   v_ratio   numeric(6,3);
 BEGIN
-  FOR r IN SELECT id AS person_id FROM app.persons WHERE is_active LOOP
+  FOR r IN
+    SELECT p.id AS person_id
+      FROM app.persons p
+     WHERE p.is_active
+       AND EXISTS (
+         SELECT 1 FROM app.role_assignments ra
+          WHERE ra.person_id = p.id AND ra.team_id = p.team_id AND ra.role = 'player'
+            AND ra.valid_from <= now() AND (ra.valid_to IS NULL OR ra.valid_to > now())
+       )
+  LOOP
     PERFORM app._compute_daily_session_load(r.person_id, current_date);
   END LOOP;
 
-  FOR r IN SELECT id AS person_id FROM app.persons WHERE is_active LOOP
+  FOR r IN
+    SELECT p.id AS person_id
+      FROM app.persons p
+     WHERE p.is_active
+       AND EXISTS (
+         SELECT 1 FROM app.role_assignments ra
+          WHERE ra.person_id = p.id AND ra.team_id = p.team_id AND ra.role = 'player'
+            AND ra.valid_from <= now() AND (ra.valid_to IS NULL OR ra.valid_to > now())
+       )
+  LOOP
     SELECT avg(dc.session_load) INTO v_acute
       FROM app.daily_checkins dc
      WHERE dc.person_id = r.person_id
@@ -606,30 +1059,33 @@ COMMENT ON FUNCTION app.cron_training_load() IS
 REVOKE EXECUTE ON FUNCTION app.cron_training_load() FROM PUBLIC, anon, authenticated;
 GRANT  EXECUTE ON FUNCTION app.cron_training_load() TO service_role;
 
--- Code-Review zu Commit f7353a4 (2026-09-27), Fund 3: ein stiller Skip ohne
+-- Code-Review zu Commit f7353a4 (2026-09-27), Fund 3, VERSCHAERFT im
+-- Security-Review zu Commit ed04ff8 (Fund 5, NIEDRIG): ein stiller Skip ohne
 -- jede Meldung wuerde exakt das Bug-Muster reproduzieren, das gerade erst
--- gefunden wurde (etwas fehlt, niemand merkt es). Deshalb hier NICHT nur
--- ein IF EXISTS-Guard: wie in 20260927082030_wire_baseline_loaddeviation_
--- cron.sql wird zuerst CREATE EXTENSION IF NOT EXISTS pg_cron versucht
--- (in der Cloud ein No-Op, die Extension existiert dort bereits). Nur wenn
--- das aus einem echten lokalen Grund scheitert (Homebrew-Postgres ohne
--- pg_cron, bekannte Grenze der lokalen Test-DB, siehe Kopfkommentar der
--- Referenzmigration), faengt die Ausnahme das ab UND meldet es laut per
--- RAISE WARNING -- der fehlende Job ist damit in jedem Migrationslauf
--- sichtbar, verschwindet aber nicht still wie zuvor. Idempotent planen:
--- erst unschedule (nur wenn der Job laut cron.job tatsaechlich existiert),
--- dann neu.
+-- gefunden wurde (etwas fehlt, niemand merkt es) -- ABER ein pauschaler
+-- "EXCEPTION WHEN OTHERS" um CREATE EXTENSION faengt in der Cloud auch echte
+-- Berechtigungsfehler lautlos ab (z.B. fehlende Superuser-Rechte), nicht nur
+-- die bekannte lokale Grenze. Jetzt gezielt: erst pruefen, OB die Extension
+-- ueberhaupt verfuegbar ist (pg_available_extensions, kein Fehler, nur eine
+-- Katalogabfrage) -- fehlt sie (Homebrew-Postgres lokal), WARNEN und
+-- ueberspringen, KEIN Exception-Block. Ist sie verfuegbar, laeuft CREATE
+-- EXTENSION IF NOT EXISTS ungeschuetzt (wie im Referenzmuster 20260927082030_
+-- wire_baseline_loaddeviation_cron.sql) -- ein echter Berechtigungsfehler in
+-- der Cloud bricht diese Migration dann sichtbar ab, statt lautlos zu
+-- verschwinden. Idempotent planen: erst unschedule (nur wenn der Job laut
+-- cron.job tatsaechlich existiert), dann neu.
 DO $$
 BEGIN
-  BEGIN
-    CREATE EXTENSION IF NOT EXISTS pg_cron;
-  EXCEPTION WHEN OTHERS THEN
-    RAISE WARNING 'app.cron_training_load NICHT geplant: CREATE EXTENSION pg_cron ist fehlgeschlagen (%). '
-      'Bekannte Grenze der lokalen Test-DB (Homebrew-Postgres ohne pg_cron) -- in der Cloud darf das '
-      'NICHT passieren, da 20260927082030_wire_baseline_loaddeviation_cron.sql die Extension bereits '
-      'aktiviert haben muss. Siehe backend/38_training_load.sql.', SQLERRM;
+  IF NOT EXISTS (SELECT 1 FROM pg_available_extensions WHERE name = 'pg_cron') THEN
+    RAISE WARNING 'app.cron_training_load NICHT geplant: Extension pg_cron ist auf dieser '
+      'Postgres-Instanz nicht verfuegbar (pg_available_extensions). Bekannte Grenze der '
+      'lokalen Test-DB (Homebrew-Postgres ohne pg_cron) -- in der Cloud darf das NICHT '
+      'passieren, da 20260927082030_wire_baseline_loaddeviation_cron.sql die Extension '
+      'bereits aktiviert haben muss. Siehe backend/38_training_load.sql.';
     RETURN;
-  END;
+  END IF;
+
+  CREATE EXTENSION IF NOT EXISTS pg_cron;
 
   IF EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'training-load-nightly') THEN
     PERFORM cron.unschedule('training-load-nightly');
