@@ -69,19 +69,25 @@ $$;
 -- herauskommen duerfen), gestern Keine Beschwerden ([]), vorgestern ueberspringen
 -- (NULL), dazu drei weitere Tage. Tag minus 27 ist der letzte im Fenster von 28 Tagen,
 -- Tag minus 28 liegt schon draussen.
-INSERT INTO app.daily_checkins (team_id, person_id, date, body_map, pain_max, sleep_quality) VALUES
+-- AP-68 Security-Review Fund 1-Rest (2026-09-27): rpc_my_body_map_history
+-- filtert seit backend/38_training_load.sql auf checkin_submitted_at IS NOT
+-- NULL (eine reine Trainingslast-Zeile ist kein Check-in). Diese Fixture
+-- simuliert echte Check-ins per Direkt-INSERT statt ueber rpc_submit_checkin
+-- (das JWT-Claims braeuchte) -- checkin_submitted_at deshalb hier explizit
+-- gesetzt, sonst verschwinden alle Tage aus dem checkins-Array.
+INSERT INTO app.daily_checkins (team_id, person_id, date, body_map, pain_max, sleep_quality, checkin_submitted_at) VALUES
   ('19191919-1919-1919-1919-191919191919', 'f1000000-0000-0000-0000-000000000001', app._t_today19(),
-   '[{"region":"knie_l","pain":6,"art":"steif","point":[0.4123456,0.6123456],"svg":"weiblich_vorne@1"},{"region":"schulter_r","pain":2}]'::jsonb, 6, 6),
-  ('19191919-1919-1919-1919-191919191919', 'f1000000-0000-0000-0000-000000000001', app._t_today19() - 1,  '[]'::jsonb, 0, 6),
-  ('19191919-1919-1919-1919-191919191919', 'f1000000-0000-0000-0000-000000000001', app._t_today19() - 2,  NULL, NULL, 6),
-  ('19191919-1919-1919-1919-191919191919', 'f1000000-0000-0000-0000-000000000001', app._t_today19() - 3,  '[{"region":"knie_l","pain":4}]'::jsonb, 4, 6),
+   '[{"region":"knie_l","pain":6,"art":"steif","point":[0.4123456,0.6123456],"svg":"weiblich_vorne@1"},{"region":"schulter_r","pain":2}]'::jsonb, 6, 6, now()),
+  ('19191919-1919-1919-1919-191919191919', 'f1000000-0000-0000-0000-000000000001', app._t_today19() - 1,  '[]'::jsonb, 0, 6, now()),
+  ('19191919-1919-1919-1919-191919191919', 'f1000000-0000-0000-0000-000000000001', app._t_today19() - 2,  NULL, NULL, 6, now()),
+  ('19191919-1919-1919-1919-191919191919', 'f1000000-0000-0000-0000-000000000001', app._t_today19() - 3,  '[{"region":"knie_l","pain":4}]'::jsonb, 4, 6, now()),
   ('19191919-1919-1919-1919-191919191919', 'f1000000-0000-0000-0000-000000000001', app._t_today19() - 5,
-   '[{"region":"ellbogen_unterarm_l","pain":3},{"region":"knie_l","pain":8}]'::jsonb, 8, 6),
-  ('19191919-1919-1919-1919-191919191919', 'f1000000-0000-0000-0000-000000000001', app._t_today19() - 27, '[{"region":"knie_l","pain":1}]'::jsonb, 1, 6),
-  ('19191919-1919-1919-1919-191919191919', 'f1000000-0000-0000-0000-000000000001', app._t_today19() - 28, '[{"region":"schulter_r","pain":9}]'::jsonb, 9, 6),
+   '[{"region":"ellbogen_unterarm_l","pain":3},{"region":"knie_l","pain":8}]'::jsonb, 8, 6, now()),
+  ('19191919-1919-1919-1919-191919191919', 'f1000000-0000-0000-0000-000000000001', app._t_today19() - 27, '[{"region":"knie_l","pain":1}]'::jsonb, 1, 6, now()),
+  ('19191919-1919-1919-1919-191919191919', 'f1000000-0000-0000-0000-000000000001', app._t_today19() - 28, '[{"region":"schulter_r","pain":9}]'::jsonb, 9, 6, now()),
   -- Spielerin B im selben Kader und eine Spielerin im anderen Kader: duerfen nirgends auftauchen.
-  ('19191919-1919-1919-1919-191919191919', 'f1000000-0000-0000-0000-000000000002', app._t_today19(),      '[{"region":"knie_l","pain":10}]'::jsonb, 10, 6),
-  ('19191919-1919-1919-1919-191919190000', 'f1000000-0000-0000-0000-000000000009', app._t_today19(),      '[{"region":"knie_l","pain":10}]'::jsonb, 10, 6);
+  ('19191919-1919-1919-1919-191919191919', 'f1000000-0000-0000-0000-000000000002', app._t_today19(),      '[{"region":"knie_l","pain":10}]'::jsonb, 10, 6, now()),
+  ('19191919-1919-1919-1919-191919190000', 'f1000000-0000-0000-0000-000000000009', app._t_today19(),      '[{"region":"knie_l","pain":10}]'::jsonb, 10, 6, now());
 
 -- ---------------------------------------------------------------------------
 -- Aufbau und Rechte (10)

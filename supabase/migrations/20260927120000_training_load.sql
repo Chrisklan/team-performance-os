@@ -44,7 +44,7 @@
 -- (DROP ... IF EXISTS, CREATE OR REPLACE wo der Rueckgabetyp gleich bleibt).
 -- Tests: backend/38_training_load.pgtap.sql.
 --
--- Security-Review (2026-09-27, zwei Runden auf Commits f7353a4/ed04ff8) --
+-- Security-Review (2026-09-27, drei Runden auf Commits f7353a4/ed04ff8/74f080f) --
 -- Fund 4 NICHT in diesem Paket behoben (needs_decision an Chris, ausserhalb
 -- des Scopes): Spieler:innen koennen ueber die bestehende Policy
 -- daily_checkins_select_team (backend/09_rpcs.sql) die Last/ACWR von
@@ -52,6 +52,29 @@
 -- korrekt gesperrt sind. Das ist eine Fachentscheidung, die ueber AP-68
 -- hinausgeht (betrifft gleichermassen die bestehenden Schlaf-/Mentalwerte-
 -- Spalten auf derselben Tabelle/Policy) -- nicht in dieser Migration geloest.
+--
+-- ZUSAETZLICHER FUND, dritte Review-Runde (per Supabase-MCP direkt gegen die
+-- Cloud verifiziert, 2026-09-27): die Annahme "app.daily_checkins INSERT/
+-- UPDATE-Grant fuer authenticated ist bereits entzogen" (Begruendung fuer
+-- den neuen Spiegel backend/39_column_privileges_revoke_ap41.sql) stimmt
+-- NICHT fuer die live Tabelle. Migration 20260925134906_column_privileges_
+-- revoke_ap41 entzieht ausschliesslich auf den SECHS toten Vor-Silo-Tabellen
+-- im public-Schema (public.daily_checkins/players/profiles/baselines/
+-- load_deviations/medical_records, siehe backend/schema.sql) -- NICHT auf
+-- app.daily_checkins, der live Tabelle, die diese Migration durchgaengig
+-- verwendet. Direkte Abfrage gegen information_schema.role_table_grants
+-- (Projekt tpos-pilot, 2026-09-27): authenticated hat auf app.daily_checkins
+-- weiterhin INSERT und UPDATE, unveraendert seit backend/09_rpcs.sql. Damit
+-- ist checkin_submitted_at (wie session_load/acute_chronic_ratio zuvor)
+-- technisch weiterhin ueber einen direkten Table-Grant faelschbar, falls
+-- PostgREST das app-Schema je exponiert (heute nicht der Fall, PGRST106,
+-- siehe Kommentar in backend/35_load_deviation.sql) -- dieselbe Kategorie
+-- Fund wie Fund 3 auf training_sessions/session_rpe, hier aber auf einer
+-- BESTEHENDEN Tabelle mit eigener Migrationshistorie. NICHT in dieser
+-- Runde behoben (ausserhalb des erteilten Auftrags fuer diese Migration,
+-- ein REVOKE auf app.daily_checkins ist eine Entscheidung mit Tragweite
+-- fuer eine Live-Tabelle, kein Nebeneffekt von AP-68) -- als expliziter
+-- Fund an den Projektinhaber zurueckgemeldet (siehe Session-Report).
 -- =============================================================================
 
 -- -----------------------------------------------------------------------------
@@ -127,20 +150,17 @@ CREATE POLICY training_sessions_select_team ON app.training_sessions
   FOR SELECT TO authenticated
   USING (team_id = app.auth_team_id());
 
--- Die folgenden zwei Policies greifen aktuell nie (kein INSERT/UPDATE-GRANT
--- fuer authenticated mehr) -- sie bleiben als dokumentierte, korrekte
--- Absicht stehen, falls ein GRANT je wieder erteilt wird, statt dass diese
--- Absicht verloren ginge.
+-- Dritte Review-Runde (Security-Review, 2026-09-27), Fund 3-Rest (NIEDRIG):
+-- die vorherige Session liess die INSERT/UPDATE-Policies "als dokumentierte
+-- Absicht" bewusst stehen. Der Review widerspricht dem zu Recht: eine
+-- Policy, die niemand mehr aktiv pflegt, aktiviert sich mit ihrer damaligen
+-- (luckenhaften) Pruefung wieder, sobald irgendwann ein GRANT erteilt wird --
+-- niemand vergleicht das dann gegen die aktuellen RPC-Regeln (Zeitfenster,
+-- session_id-Team-Pruefung, Rolle). Konsequenz: DROP statt Liegenlassen. Ein
+-- kuenftiges GRANT braucht eine neue, bewusst geschriebene Policy, keine
+-- wiederbelebte alte.
 DROP POLICY IF EXISTS training_sessions_insert_staff ON app.training_sessions;
-CREATE POLICY training_sessions_insert_staff ON app.training_sessions
-  FOR INSERT TO authenticated
-  WITH CHECK (team_id = app.auth_team_id() AND app.auth_is_staff());
-
 DROP POLICY IF EXISTS training_sessions_update_staff ON app.training_sessions;
-CREATE POLICY training_sessions_update_staff ON app.training_sessions
-  FOR UPDATE TO authenticated
-  USING (team_id = app.auth_team_id() AND app.auth_is_staff())
-  WITH CHECK (team_id = app.auth_team_id() AND app.auth_is_staff());
 
 -- Kein DELETE-Policy: das Projekt gibt Loeschen generell nicht ueber RLS frei
 -- (kein FOR DELETE Policy irgendwo im Bestand, gemessen 2026-09-27), keine
@@ -194,12 +214,10 @@ CREATE POLICY session_rpe_select_visible ON app.session_rpe
     AND (person_id = app.auth_person_id() OR app.auth_is_staff() OR app.auth_is_medical())
   );
 
--- Bleibt als dokumentierte Absicht stehen (greift aktuell nie, kein INSERT-
--- GRANT mehr), falls ein GRANT je wieder erteilt wird -- siehe Kommentar oben.
+-- Dritte Review-Runde, Fund 3-Rest: DROP statt Liegenlassen, siehe
+-- Begruendung bei app.training_sessions oben (dieselbe Policy pruefte nur
+-- person_id/team_id, nicht session_id-Teamzugehoerigkeit/Zeitfenster/Rolle).
 DROP POLICY IF EXISTS session_rpe_insert_self ON app.session_rpe;
-CREATE POLICY session_rpe_insert_self ON app.session_rpe
-  FOR INSERT TO authenticated
-  WITH CHECK (person_id = app.auth_person_id() AND team_id = app.auth_team_id());
 
 -- Kein eigenes UPDATE-Recht/Policy fuer authenticated: der Upsert in
 -- rpc_submit_session_rpe laeuft ausschliesslich ueber die SECURITY DEFINER
@@ -245,6 +263,27 @@ COMMENT ON COLUMN app.daily_checkins.checkin_submitted_at IS
   'app._compute_daily_session_load setzt sie NIEMALS -- eine Zeile, die nur durch den '
   'Trainingslast-Nachtlauf entstand, hat checkin_submitted_at = NULL. hasCheckIn in '
   'app.rpc_morning_ops prueft checkin_submitted_at IS NOT NULL, nicht Zeilen-Existenz.';
+
+-- Dritte Review-Runde (2026-09-27), Fund 1-Rest: Backfill fuer bestehende
+-- Zeilen. Ohne diesen Schritt zeigt hasCheckIn am Deploy-Tag fuer JEDE
+-- Person false, und jede historische medizinische Sicht (rpc_check_ins_
+-- medical, rpc_my_body_map_history, unten per CREATE OR REPLACE gefixt)
+-- verliert alle bisherigen echten Check-ins -- checkin_submitted_at ist bei
+-- der Spaltenanlage fuer alle Bestandszeilen NULL, unabhaengig davon, ob sie
+-- einen echten Check-in enthalten. Kriterium: irgendein Wellness-/Body-Map-
+-- Feld ist gesetzt (identisch zu den Parametern, die rpc_submit_checkin
+-- entgegennimmt) -- bewusst NICHT "session_load IS NULL", falls zum
+-- Deploy-Zeitpunkt bereits kuenstliche Nachtlauf-Zeilen existieren, die
+-- zufaellig KEIN session_load haben (z.B. weil der Nachtlauf noch nicht
+-- lief). checkin_submitted_at = submitted_at: das bestehende Feld traegt
+-- bereits den Zeitpunkt der letzten echten Abgabe (rpc_submit_checkin setzt
+-- submitted_at bei jedem Aufruf, _compute_daily_session_load fasst es nicht
+-- an), also die korrekte historische Zeit, kein now().
+UPDATE app.daily_checkins SET checkin_submitted_at = submitted_at
+ WHERE checkin_submitted_at IS NULL
+   AND (sleep_duration_min IS NOT NULL OR sleep_quality IS NOT NULL OR recovery IS NOT NULL
+        OR energy IS NOT NULL OR mental_stress IS NOT NULL OR mental_mood IS NOT NULL
+        OR mental_motivation IS NOT NULL OR training_readiness IS NOT NULL OR body_map IS NOT NULL);
 
 GRANT SELECT (id, team_id, person_id, date, sleep_duration_min, sleep_quality,
               recovery, energy, mental_stress, mental_mood, mental_motivation,
@@ -321,7 +360,15 @@ BEGIN
     -- Team-Mismatch (Silo-Schutz, Fund 2): eine bestehende Zeile gehoert
     -- einem anderen Team als dem aktuellen Team der Person (z.B. nach einem
     -- Teamwechsel) -- kein Schreiben, kein Fehler, kein Abbruch des
-    -- Cron-Laufs fuer andere Personen.
+    -- Cron-Laufs fuer andere Personen. Dritte Review-Runde (2026-09-27):
+    -- ein stiller RETURN NULL hinterlaesst keine Spur -- app.log_denial
+    -- schreibt (anders als ein RAISE WARNING, das laut Review nicht in
+    -- cron.job_run_details landet) eine Zeile in app.access_denials, sofern
+    -- JWT-Claims im aktuellen Kontext vorhanden sind (bei einem direkten
+    -- Aufruf aus rpc_submit_session_rpe der Fall, bei einem Cron-Lauf ohne
+    -- Request-Kontext ist es ein bewusstes No-Op von log_denial selbst,
+    -- gleiches Verhalten wie an jeder anderen Stelle im Projekt).
+    PERFORM app.log_denial('daily_checkins.team');
     RETURN NULL;
   END IF;
 
@@ -902,6 +949,187 @@ REVOKE EXECUTE ON FUNCTION app.rpc_morning_ops() FROM anon;
 GRANT EXECUTE ON FUNCTION app.rpc_morning_ops() TO authenticated, service_role;
 
 -- -----------------------------------------------------------------------------
+-- 9c. Dritte Review-Runde (2026-09-27), Fund 1-Rest: zwei weitere Stellen in
+--     der Medizin-/Self-Sicht zaehlten Check-ins ueber reine Zeilenexistenz.
+--     Codebase-weit geprueft (grep "FROM app.daily_checkins" ueber backend/*
+--     und supabase/migrations/*): Baseline-Engine (33_baseline_engine.sql,
+--     34_readiness_score.sql) filtert je Metrik explizit auf IS NOT NULL
+--     ueber to_jsonb(dc)->>metric -- eine reine Lastzeile hat dort ueberall
+--     NULL und traegt nichts bei, unveraendert korrekt. app.rpc_body_map_
+--     region_reports (backend/20_denial_answer.sql) zaehlt bereits explizit
+--     "dc.body_map IS NOT NULL" bzw. joint per LATERAL gegen die Elemente
+--     von body_map -- eine reine Lastzeile hat body_map=NULL und liefert
+--     dort strukturell nichts, unveraendert korrekt. app.rpc_export_my_data
+--     (backend/09_rpcs.sql) ist ein roher Self-Export (to_jsonb(dc.*), DSGVO-
+--     Auskunft ueber ALLE eigenen Daten) -- eine reine Lastzeile ist dort
+--     bewusst und korrekt Teil des Exports, kein hasCheckIn-Konzept.
+--     app.v_daily_checkins_staff (backend/09_rpcs.sql) ist eine ungenutzte
+--     View (kein SELECT-Aufrufer im gesamten Repo gefunden) -- fuer diese
+--     Migration keine Aenderung, siehe Kopfkommentar Fund 4/weitere Funde.
+-- -----------------------------------------------------------------------------
+
+-- app.rpc_check_ins_medical: Body identisch zur zuletzt gueltigen Fassung
+-- (backend/31_medical_doors.sql) -- CREATE OR REPLACE, Signatur/Rueckgabetyp
+-- unveraendert. Einzige Aenderung: die WHERE-Klausel schliesst Zeilen ohne
+-- echten Check-in aus.
+
+CREATE OR REPLACE FUNCTION app.rpc_check_ins_medical(
+  p_person_id uuid,
+  p_from      date DEFAULT NULL,
+  p_to        date DEFAULT NULL
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path = app, auth, pg_temp
+AS $$
+DECLARE
+  v_rows jsonb;
+BEGIN
+  IF app.auth_team_id() IS NULL THEN
+    RETURN app.deny('daily_checkins.body_map', 'FORBIDDEN: daily_checkins.body_map');
+  END IF;
+
+  IF app.auth_is_staff() OR app.auth_has_role('admin') THEN
+    RETURN app.deny('daily_checkins.body_map', 'FORBIDDEN: daily_checkins.body_map');
+  END IF;
+
+  IF NOT (app.auth_is_medical() OR app.auth_person_id() = p_person_id) THEN
+    RETURN app.deny('daily_checkins.medical', 'FORBIDDEN: daily_checkins.medical');
+  END IF;
+
+  IF NOT app.auth_target_is_team_player(p_person_id) THEN
+    RETURN app.deny('daily_checkins.medical', 'FORBIDDEN: daily_checkins.medical');
+  END IF;
+
+  INSERT INTO app.access_log (team_id, subject_id, actor_id, actor_role, resource, action, scope_date)
+  VALUES (
+    app.auth_team_id(), p_person_id, app.auth_person_id(), app.denial_actor_role(),
+    'daily_checkins.body_map', 'read', COALESCE(p_from, current_date)
+  );
+
+  SELECT COALESCE(jsonb_agg(x ORDER BY x->>'date'), '[]'::jsonb) INTO v_rows
+    FROM (
+      SELECT jsonb_build_object(
+               'id',                  dc.id,
+               'date',                dc.date,
+               'sleep_duration_min',  dc.sleep_duration_min,
+               'sleep_quality',       dc.sleep_quality,
+               'recovery',            dc.recovery,
+               'energy',              dc.energy,
+               'mental_stress',       dc.mental_stress,
+               'mental_mood',         dc.mental_mood,
+               'mental_motivation',   dc.mental_motivation,
+               'training_readiness',  dc.training_readiness,
+               'body_map',            dc.body_map,
+               'pain_max',            dc.pain_max,
+               'submitted_at',        dc.submitted_at
+             ) AS x
+        FROM app.daily_checkins dc
+       WHERE dc.team_id   = app.auth_team_id()
+         AND dc.person_id = p_person_id
+         AND (p_from IS NULL OR dc.date >= p_from)
+         AND (p_to   IS NULL OR dc.date <= p_to)
+         -- Fund 1-Rest: nur echte Check-ins, keine reinen Trainingslast-Zeilen.
+         AND dc.checkin_submitted_at IS NOT NULL
+    ) s;
+
+  RETURN jsonb_build_object(
+    'person_id', p_person_id,
+    'from',      p_from,
+    'to',        p_to,
+    'checkins',  v_rows
+  );
+END;
+$$;
+
+COMMENT ON FUNCTION app.rpc_check_ins_medical(uuid, date, date) IS
+  'AP-47a (2026-09-22): Tuer public.rpc_medical_checkins. Muster D, Ablehnung als '
+  'Antwort. Befund F2 geschlossen: eine Person je Aufruf, eine access_log Zeile mit '
+  'subject_id = der gelesenen Person statt einer Zeile ueber die Physio selbst. '
+  'Befund A2 geschlossen: der self Zweig laeuft jetzt ueber '
+  'app.auth_target_is_team_player statt ueber auth_person_id() allein. '
+  'AP-68 Security-Review Fund 1-Rest (2026-09-27): nur Zeilen mit checkin_submitted_at '
+  'IS NOT NULL -- eine reine Trainingslast-Zeile ist kein Check-in.';
+
+REVOKE EXECUTE ON FUNCTION app.rpc_check_ins_medical(uuid, date, date) FROM PUBLIC, anon;
+GRANT  EXECUTE ON FUNCTION app.rpc_check_ins_medical(uuid, date, date) TO authenticated;
+
+-- app.rpc_my_body_map_history: Body identisch zur zuletzt gueltigen Fassung
+-- (backend/20_denial_answer.sql) -- CREATE OR REPLACE, Signatur/Rueckgabetyp
+-- unveraendert. Einzige Aenderung: die WHERE-Klausel im checkins-Unterabfrage
+-- schliesst Zeilen ohne echten Check-in aus (bisher erschien JEDE Zeile als
+-- Tag im Kalender, auch eine reine Trainingslast-Zeile mit answered=false).
+
+CREATE OR REPLACE FUNCTION app.rpc_my_body_map_history(p_days integer DEFAULT 28)
+RETURNS jsonb
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path = app, pg_temp
+AS $$
+DECLARE
+  v_person_id uuid;
+  v_team_id   uuid;
+  v_today     date;
+  v_from      date;
+BEGIN
+  IF NOT app.auth_has_role('player') THEN
+    RETURN app.deny('daily_checkins.body_map', 'FORBIDDEN: daily_checkins.body_map');
+  END IF;
+
+  IF p_days IS NULL OR p_days < 1 OR p_days > 90 THEN
+    RAISE EXCEPTION 'INVALID: body_map_history.days' USING errcode = '22023';
+  END IF;
+
+  v_person_id := app.auth_person_id();
+  v_team_id   := app.auth_team_id();
+
+  SELECT (now() AT TIME ZONE t.timezone)::date INTO v_today
+    FROM app.teams t WHERE t.id = v_team_id;
+  v_from := v_today - (p_days - 1);
+
+  RETURN jsonb_build_object(
+    'from', v_from,
+    'to',   v_today,
+    'days', p_days,
+    'checkins', COALESCE((
+      SELECT jsonb_agg(
+               jsonb_build_object(
+                 'date', dc.date,
+                 'answered', dc.body_map IS NOT NULL,
+                 'regions', COALESCE((
+                   SELECT jsonb_agg(
+                            jsonb_build_object('region', e ->> 'region', 'pain', e -> 'pain')
+                            ORDER BY e ->> 'region')
+                     FROM jsonb_array_elements(
+                            CASE WHEN jsonb_typeof(dc.body_map) = 'array'
+                                 THEN dc.body_map ELSE '[]'::jsonb END) e
+                 ), '[]'::jsonb)
+               )
+               ORDER BY dc.date)
+        FROM app.daily_checkins dc
+       WHERE dc.person_id = v_person_id
+         AND dc.team_id   = v_team_id
+         AND dc.date     >= v_from
+         -- Fund 1-Rest: nur echte Check-ins zaehlen als Tag im Kalender.
+         AND dc.checkin_submitted_at IS NOT NULL
+    ), '[]'::jsonb)
+  );
+END;
+$$;
+
+COMMENT ON FUNCTION app.rpc_my_body_map_history(integer) IS
+  'AP-45: einzige Tuer fuer die eigene Body-Map-Historie. '
+  'AP-68 Security-Review Fund 1-Rest (2026-09-27): nur Zeilen mit checkin_submitted_at '
+  'IS NOT NULL erscheinen im checkins-Array -- eine reine Trainingslast-Zeile ist kein Tag '
+  'mit Check-in-Versuch, auch nicht mit answered=false.';
+
+REVOKE EXECUTE ON FUNCTION app.rpc_my_body_map_history(integer) FROM PUBLIC, anon;
+GRANT  EXECUTE ON FUNCTION app.rpc_my_body_map_history(integer) TO authenticated;
+
+-- -----------------------------------------------------------------------------
 -- 10. Die Tueren in public
 -- -----------------------------------------------------------------------------
 
@@ -1044,9 +1272,20 @@ BEGIN
       ELSE round((v_acute / v_chronic)::numeric, 3)
     END;
 
+    -- Dritte Review-Runde (2026-09-27), Fund 2-Rest: dieses UPDATE hatte
+    -- (anders als der Upsert in app._compute_daily_session_load direkt
+    -- darueber) KEINEN Teamfilter. Am Wechseltag einer Person haette die
+    -- Ratio in die heutige Zeile des ALTEN Teams geschrieben werden koennen,
+    -- selbst wenn der Teamwechsel schon vollzogen ist (person.team_id zeigt
+    -- bereits auf das neue Team, die Zeile fuer heute gehoert aber noch dem
+    -- alten). team_id wird bewusst frisch aus app.persons gelesen (nicht aus
+    -- einer Variable von oben), damit ein Wechsel zwischen den beiden
+    -- Schleifen dieser Funktion ebenfalls korrekt greift.
     UPDATE app.daily_checkins
        SET acute_chronic_ratio = v_ratio, updated_at = now()
-     WHERE person_id = r.person_id AND date = current_date;
+     WHERE person_id = r.person_id
+       AND date = current_date
+       AND team_id = (SELECT team_id FROM app.persons WHERE id = r.person_id);
   END LOOP;
 END;
 $$;

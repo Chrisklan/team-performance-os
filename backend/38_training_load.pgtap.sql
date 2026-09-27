@@ -18,7 +18,7 @@
 
 BEGIN;
 SET search_path = public, pgtap;
-SELECT plan(80);
+SELECT plan(93);
 
 INSERT INTO app.teams (id, name, timezone) VALUES
   ('f6000000-0000-0000-0000-000000000001','Team F6','Europe/Berlin'),
@@ -105,11 +105,62 @@ SELECT ok(
   'authenticated darf app._compute_daily_session_load nicht direkt ausfuehren (interne Funktion)'
 );
 
+-- Dritte Review-Runde, Fund 3-Rest: die drei wirkungslosen INSERT/UPDATE-
+-- Policies wurden komplett entfernt statt nur wirkungslos liegengelassen.
+SELECT ok(
+  NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'app' AND tablename = 'training_sessions' AND policyname = 'training_sessions_insert_staff'),
+  'Fund 3-Rest: training_sessions_insert_staff wurde entfernt, nicht nur wirkungslos liegengelassen'
+);
+SELECT ok(
+  NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'app' AND tablename = 'training_sessions' AND policyname = 'training_sessions_update_staff'),
+  'Fund 3-Rest: training_sessions_update_staff wurde entfernt, nicht nur wirkungslos liegengelassen'
+);
+SELECT ok(
+  NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'app' AND tablename = 'session_rpe' AND policyname = 'session_rpe_insert_self'),
+  'Fund 3-Rest: session_rpe_insert_self wurde entfernt, nicht nur wirkungslos liegengelassen'
+);
+
 SELECT throws_ok(
   $$INSERT INTO app.training_sessions (team_id, session_date, duration_min, created_by, goal_text)
     VALUES ('f6000000-0000-0000-0000-000000000001', current_date, 60, NULL, repeat('x', 2001))$$,
   NULL, NULL,
   'Security-Review Fund 5: goal_text laenger als 2000 Zeichen wird von der CHECK-Constraint abgelehnt'
+);
+
+-- -----------------------------------------------------------------------------
+-- 1c. Dritte Review-Runde, Fund 1-Rest: Backfill-Logik. Die eigentliche
+--     Migration lief gegen eine leere Tabelle (frische lokale Test-DB, 0
+--     Bestandszeilen) -- hier wird dieselbe UPDATE-Anweisung wortgleich
+--     erneut gegen zwei simulierte "Altzeilen" ausgefuehrt (Backfill ist
+--     idempotent: WHERE checkin_submitted_at IS NULL), um die Bedingung
+--     selbst zu pruefen: eine Zeile mit einem echten Wellness-Feld bekommt
+--     checkin_submitted_at nachgetragen, eine reine Trainingslast-Zeile
+--     (nur session_load gesetzt) bleibt unangetastet.
+-- -----------------------------------------------------------------------------
+INSERT INTO app.daily_checkins (team_id, person_id, date, sleep_quality, submitted_at)
+VALUES ('f6000000-0000-0000-0000-000000000001', 'f6100000-0000-0000-0000-000000000001', current_date - 20, 7, now() - interval '5 days');
+
+INSERT INTO app.daily_checkins (team_id, person_id, date, session_load, submitted_at)
+VALUES ('f6000000-0000-0000-0000-000000000001', 'f6100000-0000-0000-0000-000000000001', current_date - 21, 300, now() - interval '4 days');
+
+UPDATE app.daily_checkins SET checkin_submitted_at = submitted_at
+ WHERE checkin_submitted_at IS NULL
+   AND (sleep_duration_min IS NOT NULL OR sleep_quality IS NOT NULL OR recovery IS NOT NULL
+        OR energy IS NOT NULL OR mental_stress IS NOT NULL OR mental_mood IS NOT NULL
+        OR mental_motivation IS NOT NULL OR training_readiness IS NOT NULL OR body_map IS NOT NULL);
+
+SELECT is(
+  (SELECT checkin_submitted_at FROM app.daily_checkins
+    WHERE person_id = 'f6100000-0000-0000-0000-000000000001' AND date = current_date - 20),
+  (SELECT submitted_at FROM app.daily_checkins
+    WHERE person_id = 'f6100000-0000-0000-0000-000000000001' AND date = current_date - 20),
+  'Backfill: eine Altzeile mit echtem Wellness-Feld bekommt checkin_submitted_at = submitted_at nachgetragen'
+);
+SELECT is(
+  (SELECT checkin_submitted_at FROM app.daily_checkins
+    WHERE person_id = 'f6100000-0000-0000-0000-000000000001' AND date = current_date - 21),
+  NULL,
+  'Backfill: eine reine Trainingslast-Altzeile (nur session_load) bleibt unangetastet, checkin_submitted_at weiterhin NULL'
 );
 
 -- -----------------------------------------------------------------------------
@@ -487,10 +538,34 @@ SELECT is(
 
 UPDATE app.persons SET team_id = 'f6000000-0000-0000-0000-000000000008'
  WHERE id = 'f6100000-0000-0000-0000-000000000005';
+-- Auch role_assignments muss auf das neue Team zeigen, sonst bestaetigt
+-- app.auth_team_id() die Claims gar nicht (kein confirmed team -> log_denial
+-- selbst wuerde beim naechsten Schritt sofort mit "kein Team" aussteigen,
+-- siehe app.log_denial-Kopfkommentar in backend/09_rpcs.sql) -- exakt das
+-- Modell eines abgeschlossenen Teamwechsels wie in Abschnitt 9e.
+UPDATE app.role_assignments SET team_id = 'f6000000-0000-0000-0000-000000000008'
+ WHERE person_id = 'f6100000-0000-0000-0000-000000000005' AND role = 'player' AND valid_to IS NULL;
+
+-- Dritte Review-Runde, Fund 2-Rest: der stille RETURN NULL protokolliert
+-- jetzt per app.log_denial -- mit gueltigen, bestaetigten JWT-Claims im
+-- Kontext (hier ueber _t38_jwt gesetzt, kein SET ROLE noetig, log_denial
+-- liest nur die GUC) entsteht dafuer eine Zeile in app.access_denials.
+SELECT app._t38_jwt('f6100000-0000-0000-0000-000000000005', 'player', 'f6000000-0000-0000-0000-000000000008');
+SELECT is(
+  (SELECT count(*)::int FROM app.access_denials
+    WHERE resource = 'daily_checkins.team' AND actor_id = 'f6100000-0000-0000-0000-000000000005'),
+  0, 'Vorbedingung: noch keine access_denials-Zeile fuer diesen Grund'
+);
 
 SELECT lives_ok(
   $$SELECT app._compute_daily_session_load('f6100000-0000-0000-0000-000000000005', current_date)$$,
   'Aufruf nach simuliertem Teamwechsel laeuft ohne Exception (kein Abbruch des Cron-Laufs fuer andere Personen)'
+);
+
+SELECT is(
+  (SELECT count(*)::int FROM app.access_denials
+    WHERE resource = 'daily_checkins.team' AND actor_id = 'f6100000-0000-0000-0000-000000000005'),
+  1, 'Fund 2-Rest: der Team-Mismatch hinterlaesst jetzt eine Spur in app.access_denials (statt still zu verschwinden)'
 );
 
 SELECT is(
@@ -505,6 +580,8 @@ SELECT is(
   1, 'Fund 2: es entsteht keine zweite Zeile fuer das neue Team (unique ist auf person_id+date, nicht team_id)'
 );
 
+UPDATE app.role_assignments SET team_id = 'f6000000-0000-0000-0000-000000000001'
+ WHERE person_id = 'f6100000-0000-0000-0000-000000000005' AND role = 'player' AND valid_to IS NULL;
 UPDATE app.persons SET team_id = 'f6000000-0000-0000-0000-000000000001'
  WHERE id = 'f6100000-0000-0000-0000-000000000005';
 
@@ -560,6 +637,75 @@ SELECT is(
   NULL,
   'app._compute_daily_session_load setzt checkin_submitted_at niemals (Spieler1 hat trotz mehrfacher RPE-Abgabe weiterhin NULL)'
 );
+
+-- -----------------------------------------------------------------------------
+-- 9d. Dritte Review-Runde, Fund 1-Rest: eine reine Trainingslast-Zeile darf
+--     auch in der Medizin-Sicht (rpc_check_ins_medical) und in der eigenen
+--     Body-Map-Historie (rpc_my_body_map_history) NICHT als Check-in
+--     auftauchen. Positivkontrolle mit Spieler3, die/der in Abschnitt 9c
+--     bereits einen echten Check-in abgegeben hat.
+-- -----------------------------------------------------------------------------
+SET ROLE authenticated;
+SELECT app._t38_jwt('f6100000-0000-0000-0000-000000000005', 'player');
+SELECT is(
+  (SELECT jsonb_array_length(app.rpc_check_ins_medical('f6100000-0000-0000-0000-000000000005', current_date, current_date) -> 'checkins')),
+  0,
+  'Fund 1-Rest: reine Trainingslast-Zeile (Spieler5) erscheint NICHT in rpc_check_ins_medical'
+);
+SELECT is(
+  (SELECT jsonb_array_length(app.rpc_my_body_map_history(1) -> 'checkins')),
+  0,
+  'Fund 1-Rest: dieselbe Zeile erscheint NICHT im checkins-Array von rpc_my_body_map_history'
+);
+RESET ROLE;
+
+SET ROLE authenticated;
+SELECT app._t38_jwt('f6100000-0000-0000-0000-000000000003', 'player');
+SELECT is(
+  (SELECT jsonb_array_length(app.rpc_check_ins_medical('f6100000-0000-0000-0000-000000000003', current_date, current_date) -> 'checkins')),
+  1,
+  'Positivkontrolle: Spieler3s echter Check-in erscheint weiterhin in rpc_check_ins_medical'
+);
+SELECT is(
+  (SELECT jsonb_array_length(app.rpc_my_body_map_history(1) -> 'checkins')),
+  1,
+  'Positivkontrolle: Spieler3s echter Check-in erscheint weiterhin im checkins-Array von rpc_my_body_map_history'
+);
+RESET ROLE;
+
+-- -----------------------------------------------------------------------------
+-- 9e. Dritte Review-Runde, Fund 2-Rest: die ACWR-Schleife in app.cron_
+--     training_load() hatte keinen Teamfilter im finalen UPDATE. Simulierter
+--     abgeschlossener Teamwechsel (persons.team_id UND role_assignments.
+--     team_id zeigen schon auf das neue Team F6b), aber die heutige
+--     daily_checkins-Zeile ist noch vom alten Team F6 (z.B. von vor dem
+--     Wechsel am selben Tag) -- das UPDATE darf diese Zeile NICHT treffen.
+-- -----------------------------------------------------------------------------
+UPDATE app.daily_checkins SET acute_chronic_ratio = 9.999
+ WHERE person_id = 'f6100000-0000-0000-0000-000000000003' AND date = current_date;
+
+UPDATE app.role_assignments SET team_id = 'f6000000-0000-0000-0000-000000000008'
+ WHERE person_id = 'f6100000-0000-0000-0000-000000000003' AND role = 'player' AND valid_to IS NULL;
+UPDATE app.persons SET team_id = 'f6000000-0000-0000-0000-000000000008'
+ WHERE id = 'f6100000-0000-0000-0000-000000000003';
+
+SELECT lives_ok(
+  $$SELECT app.cron_training_load()$$,
+  'app.cron_training_load laeuft nach einem abgeschlossenen Teamwechsel weiterhin ohne Exception'
+);
+
+SELECT is(
+  (SELECT acute_chronic_ratio FROM app.daily_checkins
+    WHERE person_id = 'f6100000-0000-0000-0000-000000000003' AND date = current_date),
+  9.999,
+  'Fund 2-Rest: das ACWR-UPDATE trifft die heutige Zeile des ALTEN Teams nach einem Teamwechsel NICHT (Sentinel-Wert unveraendert)'
+);
+
+-- Aufraeumen: Spieler3 zurueck ins Team F6, fuer den Rest der Suite.
+UPDATE app.role_assignments SET team_id = 'f6000000-0000-0000-0000-000000000001'
+ WHERE person_id = 'f6100000-0000-0000-0000-000000000003' AND role = 'player' AND valid_to IS NULL;
+UPDATE app.persons SET team_id = 'f6000000-0000-0000-0000-000000000001'
+ WHERE id = 'f6100000-0000-0000-0000-000000000003';
 
 -- -----------------------------------------------------------------------------
 -- 10. app.cron_training_load kollidiert nicht mit den bestehenden Jobs
