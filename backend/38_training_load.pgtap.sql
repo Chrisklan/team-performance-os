@@ -12,13 +12,14 @@
 -- Folgetag), RPE-Zeitfenster (wie rpc_submit_checkin), acute_chronic_ratio
 -- Division-durch-Null, und dass app.cron_training_load die beiden
 -- bestehenden Nachtlaeufe (Baseline-Engine, LoadDeviation) strukturell nicht
--- beruehrt.
+-- beruehrt. Vierte Review-Runde: ACWR-Mittelwerte team-gefiltert nach
+-- Teamwechsel (9f) und Team-Mismatch ohne JWT-Claims im Cron-Kontext (9g).
 -- Laeuft in einer Transaktion und rollt zurueck, tpos_gate_test bleibt leer.
 -- =============================================================================
 
 BEGIN;
 SET search_path = public, pgtap;
-SELECT plan(93);
+SELECT plan(102);
 
 INSERT INTO app.teams (id, name, timezone) VALUES
   ('f6000000-0000-0000-0000-000000000001','Team F6','Europe/Berlin'),
@@ -706,6 +707,106 @@ UPDATE app.role_assignments SET team_id = 'f6000000-0000-0000-0000-000000000001'
  WHERE person_id = 'f6100000-0000-0000-0000-000000000003' AND role = 'player' AND valid_to IS NULL;
 UPDATE app.persons SET team_id = 'f6000000-0000-0000-0000-000000000001'
  WHERE id = 'f6100000-0000-0000-0000-000000000003';
+
+-- -----------------------------------------------------------------------------
+-- 9f. Vierte Review-Runde, Fund 1-Rest: die beiden avg()-Abfragen (acute 7
+--     Tage, chronic 28 Tage) in app.cron_training_load() muessen auf das
+--     AKTUELLE Team der Person filtern. Spieler7 hat den Teamwechsel F6 ->
+--     F6b bereits abgeschlossen (persons.team_id und role_assignments zeigen
+--     auf F6b), aber Zeilen des ALTEN Teams F6 aus der Zeit vor dem Wechsel
+--     liegen noch im 7-/28-Tage-Fenster (Sentinel-Last 1000).
+--       neues Team F6b: Tag -12 = 400, Tag -1 = 100, heute = 0 (Nachtlauf)
+--       altes Team F6:  Tag -10 = 1000, Tag -3 = 1000 (Sentinel)
+--     mit Teamfilter:  acute = (100+0)/2 = 50, chronic = (400+100+0)/3
+--                      = 166.667 -> ratio 0.300
+--     ohne Teamfilter: acute = (1000+100+0)/3 = 366.667, chronic =
+--                      (1000+1000+400+100+0)/5 = 500 -> ratio 0.733
+-- -----------------------------------------------------------------------------
+INSERT INTO app.persons (id, team_id, display_name, person_position, auth_user_id, is_active) VALUES
+  ('f6100000-0000-0000-0000-000000000007','f6000000-0000-0000-0000-000000000008','Spieler7 (gewechselt F6 -> F6b)','mittelfeld','f6100000-0000-0000-0000-000000000007',true);
+INSERT INTO app.role_assignments (team_id, person_id, role, valid_from, valid_to) VALUES
+  ('f6000000-0000-0000-0000-000000000008','f6100000-0000-0000-0000-000000000007','player', now() - interval '90 days', NULL);
+
+INSERT INTO app.daily_checkins (team_id, person_id, date, session_load) VALUES
+  ('f6000000-0000-0000-0000-000000000008','f6100000-0000-0000-0000-000000000007', current_date - 12,  400),
+  ('f6000000-0000-0000-0000-000000000008','f6100000-0000-0000-0000-000000000007', current_date - 1,   100),
+  ('f6000000-0000-0000-0000-000000000001','f6100000-0000-0000-0000-000000000007', current_date - 10, 1000),
+  ('f6000000-0000-0000-0000-000000000001','f6100000-0000-0000-0000-000000000007', current_date - 3,  1000);
+
+SELECT lives_ok(
+  $$SELECT app.cron_training_load()$$,
+  'Fund 1-Rest: app.cron_training_load laeuft mit Alt-Team-Zeilen im Fenster ohne Exception'
+);
+
+SELECT is(
+  (SELECT team_id FROM app.daily_checkins
+    WHERE person_id = 'f6100000-0000-0000-0000-000000000007' AND date = current_date),
+  'f6000000-0000-0000-0000-000000000008'::uuid,
+  'Vorbedingung: Spieler7s heutige Zeile (vom Nachtlauf angelegt) gehoert dem neuen Team F6b'
+);
+
+SELECT is(
+  (SELECT acute_chronic_ratio FROM app.daily_checkins
+    WHERE person_id = 'f6100000-0000-0000-0000-000000000007' AND date = current_date),
+  0.300,
+  'Fund 1-Rest: acute/chronic-Mittel beziehen nur Tage des aktuellen Teams ein (0.300, ohne Teamfilter waere es 0.733)'
+);
+
+-- -----------------------------------------------------------------------------
+-- 9g. Vierte Review-Runde, Fund 2-Rest: Team-Mismatch im echten Cron-Kontext
+--     (KEINE JWT-Claims, wie bei pg_cron/service_role). app.log_denial ist
+--     dort garantiert ein No-Op -- die Funktion muss trotzdem NULL liefern,
+--     darf nicht abbrechen und meldet den Mismatch per RAISE WARNING
+--     (non-fatal, von pgTAP nicht abfangbar, daher strukturell geprueft).
+--     Fixture: Spieler7 (inzwischen Team F6b) hat fuer die F6-Einheit
+--     "Grenzfall innerhalb" (vor 2 Tagen) noch einen RPE-Eintrag des ALTEN
+--     Teams F6 und eine daily_checkins-Zeile des alten Teams (Sentinel 777).
+-- -----------------------------------------------------------------------------
+INSERT INTO app.session_rpe (team_id, person_id, session_id, rpe, duration_min)
+SELECT 'f6000000-0000-0000-0000-000000000001', 'f6100000-0000-0000-0000-000000000007', ts.id, 5, 60
+  FROM app.training_sessions ts WHERE ts.goal_text = 'Grenzfall innerhalb';
+INSERT INTO app.daily_checkins (team_id, person_id, date, session_load) VALUES
+  ('f6000000-0000-0000-0000-000000000001','f6100000-0000-0000-0000-000000000007', current_date - 2, 777);
+
+-- JWT-Claims aus frueheren Abschnitten entfernen (set_config(..., true) gilt
+-- transaktionsweit) -- simuliert den Cron-Kontext ohne Request.
+SELECT set_config('request.jwt.claims', '', true);
+
+SELECT ok(
+  app.auth_team_id() IS NULL AND app.auth_person_id() IS NULL,
+  'Vorbedingung: kein JWT-Kontext (auth_team_id/auth_person_id sind NULL, wie im Cron-Lauf)'
+);
+
+SELECT is(
+  app._compute_daily_session_load('f6100000-0000-0000-0000-000000000007', current_date - 2),
+  NULL::numeric,
+  'Fund 2-Rest: Team-Mismatch ohne JWT-Claims liefert NULL'
+);
+
+SELECT lives_ok(
+  $$SELECT app._compute_daily_session_load('f6100000-0000-0000-0000-000000000007', current_date - 2)$$,
+  'Fund 2-Rest: Team-Mismatch ohne JWT-Claims bricht nicht ab (RAISE WARNING ist non-fatal)'
+);
+
+SELECT is(
+  (SELECT session_load FROM app.daily_checkins
+    WHERE person_id = 'f6100000-0000-0000-0000-000000000007' AND date = current_date - 2),
+  777.000,
+  'Fund 2-Rest: die Zeile des alten Teams bleibt unveraendert (Sentinel 777, kein Ueberschreiben)'
+);
+
+SELECT is(
+  (SELECT count(*)::int FROM app.access_denials
+    WHERE actor_id = 'f6100000-0000-0000-0000-000000000007'),
+  0,
+  'Fund 2-Rest: ohne JWT-Claims schreibt log_denial nichts (No-Op) -- deshalb braucht es die WARNING'
+);
+
+SELECT ok(
+  (SELECT prosrc FROM pg_proc WHERE oid = 'app._compute_daily_session_load(uuid,date)'::regprocedure)
+    ~ 'RAISE WARNING ''app\._compute_daily_session_load: Team-Mismatch',
+  'Fund 2-Rest: _compute_daily_session_load meldet den Team-Mismatch per RAISE WARNING (claims-unabhaengige Spur im Postgres-Log)'
+);
 
 -- -----------------------------------------------------------------------------
 -- 10. app.cron_training_load kollidiert nicht mit den bestehenden Jobs

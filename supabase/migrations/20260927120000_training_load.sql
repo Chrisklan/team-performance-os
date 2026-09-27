@@ -75,6 +75,17 @@
 -- ein REVOKE auf app.daily_checkins ist eine Entscheidung mit Tragweite
 -- fuer eine Live-Tabelle, kein Nebeneffekt von AP-68) -- als expliziter
 -- Fund an den Projektinhaber zurueckgemeldet (siehe Session-Report).
+--
+-- Vierte Review-Runde (2026-09-27, Re-Review Security + Code auf 8ea7c69),
+-- zwei schmale Restfunde behoben:
+--   * Fund 1-Rest (ACWR-Mittelwerte): die beiden avg()-Abfragen in app.
+--     cron_training_load filterten nur auf person_id -- nach einem Teamwechsel
+--     mischten sie Tage aus altem und neuem Team. Jetzt derselbe frische
+--     app.persons-Teamfilter wie im finalen UPDATE.
+--   * Fund 2-Rest (Spur im Cron-Kontext): app.log_denial ist im Cron-Pfad
+--     (keine JWT-Claims) garantiert ein No-Op. app._compute_daily_session_load
+--     wirft bei Team-Mismatch jetzt zusaetzlich ein RAISE WARNING (non-fatal,
+--     unabhaengig von Claims, landet im Postgres-Log).
 -- =============================================================================
 
 -- -----------------------------------------------------------------------------
@@ -368,7 +379,17 @@ BEGIN
     -- Aufruf aus rpc_submit_session_rpe der Fall, bei einem Cron-Lauf ohne
     -- Request-Kontext ist es ein bewusstes No-Op von log_denial selbst,
     -- gleiches Verhalten wie an jeder anderen Stelle im Projekt).
+    -- Vierte Review-Runde (2026-09-27), Fund 2-Rest: genau dieser Cron-Pfad
+    -- (app.cron_training_load, service_role, keine JWT-Claims) ist aber der
+    -- Hauptfall fuer einen Team-Mismatch -- log_denial ist dort garantiert
+    -- ein No-Op (auth_team_id()/auth_person_id() sind NULL). Deshalb
+    -- zusaetzlich RAISE WARNING: unabhaengig von JWT-Claims, landet im
+    -- Postgres-Log (und damit in den Supabase-Postgres-Logs des pg_cron-
+    -- Laufs). WARNING ist non-fatal -- kein Abbruch des Nachtlaufs fuer die
+    -- uebrigen Personen, keine EXCEPTION.
     PERFORM app.log_denial('daily_checkins.team');
+    RAISE WARNING 'app._compute_daily_session_load: Team-Mismatch fuer person_id=%, erwartetes Team=%, Zeile bleibt unveraendert',
+      p_person_id, v_team_id;
     RETURN NULL;
   END IF;
 
@@ -1257,15 +1278,24 @@ BEGIN
             AND ra.valid_from <= now() AND (ra.valid_to IS NULL OR ra.valid_to > now())
        )
   LOOP
+    -- Vierte Review-Runde (2026-09-27), Fund 1-Rest: auch die beiden
+    -- Mittelwerte sind team-gefiltert (derselbe frische app.persons-Lookup
+    -- wie im UPDATE unten). Nach einem Teamwechsel bleiben die alten
+    -- daily_checkins-Zeilen des vorherigen Teams fuer vergangene Tage
+    -- bestehen -- ohne Filter wuerde die Ratio Tage aus altem und neuem Team
+    -- vermischen (kein Datenleck dank Filter im UPDATE, aber ein sachlich
+    -- falscher Wert). Mit Filter zaehlen nur Tage im aktuellen Team.
     SELECT avg(dc.session_load) INTO v_acute
       FROM app.daily_checkins dc
      WHERE dc.person_id = r.person_id
-       AND dc.date BETWEEN current_date - 6 AND current_date;
+       AND dc.date BETWEEN current_date - 6 AND current_date
+       AND dc.team_id = (SELECT team_id FROM app.persons WHERE id = r.person_id);
 
     SELECT avg(dc.session_load) INTO v_chronic
       FROM app.daily_checkins dc
      WHERE dc.person_id = r.person_id
-       AND dc.date BETWEEN current_date - 27 AND current_date;
+       AND dc.date BETWEEN current_date - 27 AND current_date
+       AND dc.team_id = (SELECT team_id FROM app.persons WHERE id = r.person_id);
 
     v_ratio := CASE
       WHEN v_chronic IS NULL OR v_chronic = 0 THEN NULL
