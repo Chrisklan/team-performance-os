@@ -34,9 +34,15 @@
 --     mental_mood, mental_motivation, training_readiness, pain_max).
 --     to_jsonb(dc) ->> metric::text liest die passende Spalte ohne Kopie und
 --     ohne Synchronisationsrisiko (eine Quelle der Wahrheit).
---     session_load/acute_chronic_ratio (Trainingsmanagement-Modul, nicht
---     gebaut) liefern strukturell 0 Beobachtungen -> status='insufficient',
---     das ist der korrekte, sichere Default, kein Fehler.
+--     session_load/acute_chronic_ratio lieferten bis AP-68 (2026-09-27,
+--     backend/38_training_load.sql) strukturell 0 Beobachtungen, weil das
+--     Trainingsmanagement-Modul nicht gebaut war -> status='insufficient'
+--     war der korrekte, sichere Default. Seit AP-68 fuellt der Nachtlauf
+--     app.cron_training_load (02:30, vor dieser Engine um 03:00) beide
+--     Spalten auf app.daily_checkins echt -- _compute_baseline liest sie
+--     unveraendert ueber denselben to_jsonb(dc)->>metric::text-Pfad, sobald
+--     genug Beobachtungstage vorliegen (n_obs>=10) greift status='ok' auch
+--     fuer diese beiden Metriken.
 --
 -- Muster D (Modul 7 Abschnitt 6) fuer die neue Tuer:
 --   1. VOLATILE, app Funktion und Tuer.
