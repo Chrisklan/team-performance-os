@@ -57,16 +57,30 @@ EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 -- 2. app.training_sessions — team-weit, kein Teilgruppen-/Status-Feld
 -- -----------------------------------------------------------------------------
 
+-- Code-Review zu Commit f7353a4 (2026-09-27), Fund 1+2:
+--   * created_by war NOT NULL + ON DELETE SET NULL -- widersprach sich
+--     (Loeschen der anlegenden Person haette an der NOT-NULL-Constraint
+--     scheitern muessen, statt sauber auf NULL zu fallen). Jetzt nullable:
+--     die Einheit bleibt bei Personen-Loeschung als Historie erhalten.
+--   * duration_min hatte keine Obergrenze. session_rpe.session_load ist
+--     numeric(8,3) (5 Vorkommastellen, max 99999.999) -- duration_min nahe
+--     dem smallint-Maximum (32767) mit rpe=10 waere 327670, numeric field
+--     overflow beim INSERT. Exakt dieselbe Overflow-Fehlerklasse wie der in
+--     der Vorsession gefundene und in backend/37_load_deviation_overflow_
+--     fix.sql behobene Bug bei load_deviations.deviation. 300 Minuten (5h)
+--     ist grosszuegig ueber jeder realistischen Trainingseinheit oder einem
+--     Ganztagslehrgang, macht aber rpe*duration_min <= 3000 (weit unter dem
+--     numeric(8,3)-Limit) strukturell unmoeglich zu ueberschreiten.
 CREATE TABLE IF NOT EXISTS app.training_sessions (
   id                 uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   team_id            uuid NOT NULL REFERENCES app.teams(id) ON DELETE CASCADE,
   session_date       date NOT NULL,
   start_time         time,
-  duration_min       smallint NOT NULL CHECK (duration_min > 0),
+  duration_min       smallint NOT NULL CHECK (duration_min > 0 AND duration_min <= 300),
   session_type       app.app_session_type NOT NULL DEFAULT 'field',
   planned_intensity  smallint CHECK (planned_intensity BETWEEN 1 AND 10),
   goal_text          text,
-  created_by         uuid NOT NULL REFERENCES app.persons(id) ON DELETE SET NULL,
+  created_by         uuid REFERENCES app.persons(id) ON DELETE SET NULL,
   created_at         timestamptz NOT NULL DEFAULT now(),
   updated_at         timestamptz NOT NULL DEFAULT now()
 );
@@ -244,7 +258,7 @@ BEGIN
     RAISE EXCEPTION 'INVALID: training_sessions.session_date' USING errcode = '22023';
   END IF;
 
-  IF p_duration_min IS NULL OR p_duration_min <= 0 THEN
+  IF p_duration_min IS NULL OR p_duration_min <= 0 OR p_duration_min > 300 THEN
     RAISE EXCEPTION 'INVALID: training_sessions.duration_min' USING errcode = '22023';
   END IF;
 
@@ -319,7 +333,7 @@ BEGIN
     RAISE EXCEPTION 'INVALID: training_sessions.session_date' USING errcode = '22023';
   END IF;
 
-  IF p_duration_min IS NULL OR p_duration_min <= 0 THEN
+  IF p_duration_min IS NULL OR p_duration_min <= 0 OR p_duration_min > 300 THEN
     RAISE EXCEPTION 'INVALID: training_sessions.duration_min' USING errcode = '22023';
   END IF;
 
@@ -592,24 +606,38 @@ COMMENT ON FUNCTION app.cron_training_load() IS
 REVOKE EXECUTE ON FUNCTION app.cron_training_load() FROM PUBLIC, anon, authenticated;
 GRANT  EXECUTE ON FUNCTION app.cron_training_load() TO service_role;
 
--- Idempotent planen: erst unschedule (nur wenn der Job laut cron.job
--- tatsaechlich existiert), dann neu -- exakt das Muster aus 20260927082030_
--- wire_baseline_loaddeviation_cron.sql. pg_cron ist dort bereits als
--- Extension aktiviert (CREATE EXTENSION IF NOT EXISTS pg_cron) -- lokal
--- (Homebrew-Postgres) ist die Extension nicht installiert, dieser Block
--- schlaegt dort fehl, das ist eine bekannte Grenze der lokalen Test-DB, kein
--- Fehler dieser Migration (siehe Kopfkommentar der Referenzmigration).
+-- Code-Review zu Commit f7353a4 (2026-09-27), Fund 3: ein stiller Skip ohne
+-- jede Meldung wuerde exakt das Bug-Muster reproduzieren, das gerade erst
+-- gefunden wurde (etwas fehlt, niemand merkt es). Deshalb hier NICHT nur
+-- ein IF EXISTS-Guard: wie in 20260927082030_wire_baseline_loaddeviation_
+-- cron.sql wird zuerst CREATE EXTENSION IF NOT EXISTS pg_cron versucht
+-- (in der Cloud ein No-Op, die Extension existiert dort bereits). Nur wenn
+-- das aus einem echten lokalen Grund scheitert (Homebrew-Postgres ohne
+-- pg_cron, bekannte Grenze der lokalen Test-DB, siehe Kopfkommentar der
+-- Referenzmigration), faengt die Ausnahme das ab UND meldet es laut per
+-- RAISE WARNING -- der fehlende Job ist damit in jedem Migrationslauf
+-- sichtbar, verschwindet aber nicht still wie zuvor. Idempotent planen:
+-- erst unschedule (nur wenn der Job laut cron.job tatsaechlich existiert),
+-- dann neu.
 DO $$
 BEGIN
-  IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_cron') THEN
-    IF EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'training-load-nightly') THEN
-      PERFORM cron.unschedule('training-load-nightly');
-    END IF;
+  BEGIN
+    CREATE EXTENSION IF NOT EXISTS pg_cron;
+  EXCEPTION WHEN OTHERS THEN
+    RAISE WARNING 'app.cron_training_load NICHT geplant: CREATE EXTENSION pg_cron ist fehlgeschlagen (%). '
+      'Bekannte Grenze der lokalen Test-DB (Homebrew-Postgres ohne pg_cron) -- in der Cloud darf das '
+      'NICHT passieren, da 20260927082030_wire_baseline_loaddeviation_cron.sql die Extension bereits '
+      'aktiviert haben muss. Siehe backend/38_training_load.sql.', SQLERRM;
+    RETURN;
+  END;
 
-    PERFORM cron.schedule(
-      'training-load-nightly',
-      '30 2 * * *',
-      $cron$SELECT app.cron_training_load();$cron$
-    );
+  IF EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'training-load-nightly') THEN
+    PERFORM cron.unschedule('training-load-nightly');
   END IF;
+
+  PERFORM cron.schedule(
+    'training-load-nightly',
+    '30 2 * * *',
+    $cron$SELECT app.cron_training_load();$cron$
+  );
 END $$;

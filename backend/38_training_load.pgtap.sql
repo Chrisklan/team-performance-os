@@ -18,7 +18,7 @@
 
 BEGIN;
 SET search_path = public, pgtap;
-SELECT plan(48);
+SELECT plan(56);
 
 INSERT INTO app.teams (id, name, timezone) VALUES
   ('f6000000-0000-0000-0000-000000000001','Team F6','Europe/Berlin'),
@@ -109,6 +109,32 @@ SELECT ok(
 RESET ROLE;
 
 -- -----------------------------------------------------------------------------
+-- 2b. Code-Review-Fund 2: duration_min braucht eine Obergrenze, sonst
+--     numeric field overflow bei session_load = rpe * duration_min
+--     (numeric(8,3), max 99999.999). 300 ist die Grenze, 301 muss abgelehnt
+--     werden, 300 muss durchgehen (Grenzfall exakt an der Kante).
+-- -----------------------------------------------------------------------------
+SET ROLE authenticated;
+SELECT app._t38_jwt('f6100000-0000-0000-0000-000000000002', 'coach');
+SELECT throws_ok(
+  $$SELECT app.rpc_create_training_session(current_date, NULL::time, 301::smallint, 'field'::app.app_session_type, NULL, 'Zu lang')$$,
+  '22023', NULL,
+  'duration_min = 301 wird abgelehnt (Obergrenze, verhindert numeric field overflow bei session_load)'
+);
+SELECT ok(
+  NOT app.is_denial(app.rpc_create_training_session(current_date, NULL::time, 300::smallint, 'field'::app.app_session_type, NULL, 'Grenzfall 300')),
+  'duration_min = 300 (Grenzfall, genau an der Kante) wird noch akzeptiert'
+);
+RESET ROLE;
+
+SELECT throws_ok(
+  $$INSERT INTO app.training_sessions (team_id, session_date, duration_min, created_by)
+    VALUES ('f6000000-0000-0000-0000-000000000001', current_date, 301, 'f6100000-0000-0000-0000-000000000002')$$,
+  NULL, NULL,
+  'duration_min = 301 wird auch von der CHECK-Constraint auf der Tabelle selbst abgelehnt (zweite Sicherheitsebene)'
+);
+
+-- -----------------------------------------------------------------------------
 -- 3. rpc_update_training_session — nur Staff, nur eigenes Team
 -- -----------------------------------------------------------------------------
 SET ROLE authenticated;
@@ -145,7 +171,7 @@ SET ROLE authenticated;
 SELECT app._t38_jwt('f6100000-0000-0000-0000-000000000001', 'player');
 SELECT is(
   (SELECT count(*)::int FROM jsonb_array_elements(app.rpc_list_training_sessions(current_date, current_date))),
-  2, 'Spieler sieht beide Einheiten des eigenen Teams am heutigen Tag'
+  3, 'Spieler sieht alle drei Einheiten des eigenen Teams am heutigen Tag (Haupt-, Zusatz- und Grenzfall-300-Einheit)'
 );
 RESET ROLE;
 
@@ -364,6 +390,45 @@ SELECT ok(
 SELECT ok(
   (SELECT prosecdef FROM pg_proc WHERE oid = 'app.cron_training_load()'::regprocedure),
   'app.cron_training_load ist SECURITY DEFINER (Muster D)'
+);
+
+-- -----------------------------------------------------------------------------
+-- 11. Code-Review-Fund 1: created_by ist nullable (passt zu ON DELETE SET
+--     NULL). Loeschen der anlegenden Person darf die Einheit nicht
+--     zerstoeren, sondern muss created_by sauber auf NULL setzen.
+-- -----------------------------------------------------------------------------
+INSERT INTO app.persons (id, team_id, display_name, person_position, auth_user_id, is_active) VALUES
+  ('f6100000-0000-0000-0000-000000000006','f6000000-0000-0000-0000-000000000001','Coach6 F6 (wird geloescht)','coach','f6100000-0000-0000-0000-000000000006',true);
+INSERT INTO app.role_assignments (team_id, person_id, role, valid_from, valid_to) VALUES
+  ('f6000000-0000-0000-0000-000000000001','f6100000-0000-0000-0000-000000000006','coach', now() - interval '90 days', NULL);
+
+SET ROLE authenticated;
+SELECT app._t38_jwt('f6100000-0000-0000-0000-000000000006', 'coach');
+SELECT ok(
+  NOT app.is_denial(app.rpc_create_training_session(current_date, NULL::time, 60::smallint, 'field'::app.app_session_type, NULL, 'Einheit von Coach6')),
+  'Fixture: Coach6 legt eine Einheit an (created_by = Coach6)'
+);
+RESET ROLE;
+
+SELECT is(
+  (SELECT created_by FROM app.training_sessions WHERE goal_text = 'Einheit von Coach6'),
+  'f6100000-0000-0000-0000-000000000006'::uuid,
+  'Vorbedingung: created_by zeigt auf Coach6, bevor die Person geloescht wird'
+);
+
+SELECT lives_ok(
+  $$DELETE FROM app.persons WHERE id = 'f6100000-0000-0000-0000-000000000006'$$,
+  'Coach6 kann geloescht werden, ohne an training_sessions.created_by zu scheitern (created_by ist nullable)'
+);
+
+SELECT is(
+  (SELECT created_by FROM app.training_sessions WHERE goal_text = 'Einheit von Coach6'),
+  NULL,
+  'ON DELETE SET NULL greift: created_by ist nach der Personen-Loeschung NULL, die Einheit selbst bleibt als Historie erhalten'
+);
+SELECT ok(
+  EXISTS (SELECT 1 FROM app.training_sessions WHERE goal_text = 'Einheit von Coach6'),
+  'die Trainingseinheit selbst wurde durch die Personen-Loeschung nicht mitgeloescht'
 );
 
 SELECT * FROM finish();
