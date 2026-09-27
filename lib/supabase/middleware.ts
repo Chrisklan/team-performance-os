@@ -12,7 +12,7 @@ import { appRoleFromClaims, homePathForRole } from "@/lib/medical/role";
 
 // Routen, die eine Anmeldung brauchen: app/(trainer), app/(medizin) und app/konto.
 // Neue geschuetzte Seiten hier eintragen. Die Rolle prueft die Seite selbst.
-export const TRAINER_ROUTES = ["/dashboard"] as const;
+export const TRAINER_ROUTES = ["/dashboard", "/planung"] as const;
 export const MEDICAL_ROUTES = ["/medizin"] as const;
 // Eigenes Konto (Passwort festlegen), fuer jede Rolle.
 export const ACCOUNT_ROUTES = ["/konto"] as const;

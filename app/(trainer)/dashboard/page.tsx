@@ -63,6 +63,12 @@ export default async function TrainerDashboardPage() {
             {isLive ? "Live" : "Letzter Sync"}
           </span>
           <Link
+            href="/planung"
+            className="flex h-12 items-center justify-center rounded-md px-4 text-sm text-muted transition-colors hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-signal"
+          >
+            Planung
+          </Link>
+          <Link
             href="/dashboard/abweichungen"
             className="flex h-12 items-center justify-center rounded-md px-4 text-sm text-muted transition-colors hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-signal"
           >
