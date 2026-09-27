@@ -85,10 +85,10 @@
 | Supabase Inc. | Alle DB-Daten | Art. 28 (Auftragsverarbeiter) |
 | Vercel Inc. | Web-Logs, Session-Daten | Art. 28 (Auftragsverarbeiter) |
 | Expo Inc. | Push-Tokens | Art. 28 (Auftragsverarbeiter) |
-| Modellaufrufe: Anbieter des Klassifikationsmodells JEV (Anbieter und Ort nach ADR-019 Entscheidung E3, noch offen) | Pseudonymisierte Auszüge aus Check-in, Body Map, ggf. Freitext (Art. 9), einzeln je Aufruf | Art. 28 (Auftragsverarbeiter), **nur mit AVV, Verarbeitung EU/EWR, ohne Speicherung und ohne Training**. Bei Betrieb in eigener Infrastruktur entfällt der Empfänger |
-| Modellaufrufe: Anbieter des Reasoning-Modells für Trainerfragen (Anbieter nach ADR-019 Entscheidung E3, noch offen) | Pseudonymisierte Antworten der Trainer-Türen (Band, Freigabe-Badge, Anwesenheit, freigegebene Abweichungen). Nie Body Map, Freitext, Schmerzwert oder Score-Zahl | Art. 28, Bedingungen wie oben |
+| Modellaufrufe: Anbieter des Klassifikationsmodells JEV (TypeSafe, ADR-019 Entscheidung E3 vom 2026-09-27: Einbau mit Ein/Aus-Schalter, Echtdaten ausdrücklich VOR Abschluss eines AVV erlaubt — bewusste Ausnahme, Risiko bei Chris/Unternehmen, siehe ADR-019 §3.6 Warnkasten) | Pseudonymisierte Auszüge aus Check-in, Body Map, ggf. Freitext (Art. 9), einzeln je Aufruf | Art. 28 (Auftragsverarbeiter), **AVV bleibt Ziel, ist aber keine Vorbedingung mehr für den Start (E3-Ausnahme)**. Bei Betrieb in eigener Infrastruktur entfällt der Empfänger |
+| Modellaufrufe: Anbieter des Reasoning-Modells für Trainerfragen (Anbieter nach ADR-019 Entscheidung E3) | Pseudonymisierte Antworten der Trainer-Türen (Band, Freigabe-Badge, Anwesenheit, freigegebene Abweichungen). Nie Body Map, Freitext, Schmerzwert oder Score-Zahl | Art. 28, Bedingungen wie oben |
 
-> **Ausgeschlossen als Empfänger personenbezogener Daten (ADR-019 §3.6):** kostenlose Modellendpunkte, Modell-Router oder Anbieter ohne AVV, auch bei pseudonymisierten Daten. Bis zur Entscheidung E3 laufen Modellaufrufe nur mit synthetischen Daten.
+> **Ausgeschlossen als Empfänger personenbezogener Daten (ADR-019 §3.6):** kostenlose Modellendpunkte, Modell-Router oder Anbieter ohne AVV, auch bei pseudonymisierten Daten — davon unberührt ist die E3-Ausnahme für TypeSafe/JEV selbst (siehe oben).
 
 ---
 
@@ -99,7 +99,7 @@
 | Supabase | USA (Frankfurt-Region) | SCC (Standard Contractual Clauses) |
 | Vercel | USA | SCC |
 | Expo | USA | SCC |
-| Modellanbieter (ADR-019, Entscheidung E3 offen) | **EU/EWR vorausgesetzt** | Keine Drittlandübermittlung vorgesehen. Ein Anbieter mit Verarbeitung außerhalb EU/EWR ist für Personenbezug ausgeschlossen |
+| Modellanbieter (ADR-019, Entscheidung E3 vom 2026-09-27 entschieden, E4 EU-AI-Act/BetrVG weiterhin offen) | **EU/EWR vorausgesetzt** | Keine Drittlandübermittlung vorgesehen. Ein Anbieter mit Verarbeitung außerhalb EU/EWR ist für Personenbezug ausgeschlossen |
 
 ---
 
