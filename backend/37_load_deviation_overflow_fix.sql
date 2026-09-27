@@ -1,0 +1,26 @@
+-- =============================================================================
+-- 37_load_deviation_overflow_fix.sql — Spiegel-Datei zu supabase/migrations/
+-- 20260927100000_fix_load_deviation_overflow.sql (Muster wie backend/36_
+-- mental_stress_direction.sql, siehe Kopfkommentar dort).
+--
+-- FUND (2026-09-27, Trockenlauf scripts/backfill-deviations.sql brach mit
+-- "numeric field overflow" in app.rpc_compute_load_deviations ab): app.
+-- load_deviations.deviation ist numeric(5,2) (max Betrag < 10^3), waehrend
+-- app.metric_deviations.delta_pct (backend/33_baseline_engine.sql), aus dem
+-- deviation 1:1 kopiert wird (backend/35_load_deviation.sql, COALESCE(r.
+-- delta_pct, 0)), numeric(6,2) ist (max Betrag < 10^4). Jeder delta_pct-Wert
+-- mit Betrag >= 1000 sprengt load_deviations. Lokal reproduziert (Baseline
+-- median=0.05, sigma=0.05, Check-in-Wert 2 -> delta_pct=3900.00): exakt
+-- derselbe Fehler wie im Trockenlauf. Betrifft auch den echten naechtlichen
+-- Cron-Job (app.cron_loaddeviation, Migration 20260927082030).
+--
+-- FIX: deviation auf numeric(9,2) verbreitern -- deckt den vollen Wertebereich
+-- von delta_pct (numeric(6,2)) plus Sicherheitsmarge fuer kuenftige
+-- Aenderungen ab.
+--
+-- Voraussetzung: backend/09_rpcs.sql (CREATE TABLE app.load_deviations),
+-- backend/35_load_deviation.sql (Metrik-Erweiterung, rpc_compute_load_
+-- deviations). Tests: backend/37_load_deviation_overflow_fix.pgtap.sql.
+-- =============================================================================
+
+ALTER TABLE app.load_deviations ALTER COLUMN deviation TYPE numeric(9,2);
