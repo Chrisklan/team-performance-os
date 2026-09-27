@@ -66,6 +66,16 @@
 | Zugriffsverweigerungen | `app.access_denials` | Compliance-Metrik |
 | Push-Token | Expo Push Service | Benachrichtigung |
 
+### 3.5 Daten der KI-Ebene (ADR-019, Entwurf, noch nicht angenommen)
+| Datenfeld | Tabelle | Zweck |
+|-----------|---------|-------|
+| Hinweis aus Signal oder Einordnung (Regel- bzw. Signal-ID, Einordnungsklasse, Sichtungsreihenfolge, Konfidenz, Modellversion, Status offen/übernommen/verworfen, Bearbeiter) | `app.signal_hints` (Arbeitsname) | Sichtung durch Physio und Arzt, Vorstufe zum Freigabevorschlag. **Art. 9 DSGVO**, wenn aus Art.-9-Eingaben abgeleitet. Nur `physio` und `doctor` lesen, jeder Lesezugriff in `app.access_log` |
+| Aufrufprotokoll Modellaufrufe (Zeitpunkt, Zweck, Auslöser, betroffene Personen, Anbieter, Modell und Version, Hash der Eingabe, Ergebnisklasse), **ohne Inhalt** | `app.model_call_log` (Arbeitsname) | Rechenschaftspflicht Art. 5 Abs. 2, Nachvollziehbarkeit, Reproduzierbarkeit |
+| Kennzeichen Vorbefüllung (vorbefüllt ja/nein, geändert ja/nein) | am Check-in (`app.daily_checkins`, Spalte noch festzulegen) | Messung der Check-in-Beschleunigung (AP-67). Keine Modellwerte, nur die Tatsache der Vorbefüllung |
+| Check-in-Freitext (nur falls ADR-019 Entscheidung E5 angenommen wird) | eigene medizinseitige Tabelle, **nicht** `app.daily_checkins` | Einordnung durch JEV (AP-65), Sichtung durch Medizin. **Art. 9 DSGVO** |
+
+**Nicht gespeichert:** Prompts, an das Modell gesendete Rohtexte, Rohantworten, Reasoning-Spuren, Antworten auf Trainerfragen, Audio aus dem Diktat (die Spracherkennung läuft auf dem Gerät).
+
 ---
 
 ## 4. Kategorien von Empfängern
@@ -75,6 +85,10 @@
 | Supabase Inc. | Alle DB-Daten | Art. 28 (Auftragsverarbeiter) |
 | Vercel Inc. | Web-Logs, Session-Daten | Art. 28 (Auftragsverarbeiter) |
 | Expo Inc. | Push-Tokens | Art. 28 (Auftragsverarbeiter) |
+| Modellaufrufe: Anbieter des Klassifikationsmodells JEV (Anbieter und Ort nach ADR-019 Entscheidung E3, noch offen) | Pseudonymisierte Auszüge aus Check-in, Body Map, ggf. Freitext (Art. 9), einzeln je Aufruf | Art. 28 (Auftragsverarbeiter), **nur mit AVV, Verarbeitung EU/EWR, ohne Speicherung und ohne Training**. Bei Betrieb in eigener Infrastruktur entfällt der Empfänger |
+| Modellaufrufe: Anbieter des Reasoning-Modells für Trainerfragen (Anbieter nach ADR-019 Entscheidung E3, noch offen) | Pseudonymisierte Antworten der Trainer-Türen (Band, Freigabe-Badge, Anwesenheit, freigegebene Abweichungen). Nie Body Map, Freitext, Schmerzwert oder Score-Zahl | Art. 28, Bedingungen wie oben |
+
+> **Ausgeschlossen als Empfänger personenbezogener Daten (ADR-019 §3.6):** kostenlose Modellendpunkte, Modell-Router oder Anbieter ohne AVV, auch bei pseudonymisierten Daten. Bis zur Entscheidung E3 laufen Modellaufrufe nur mit synthetischen Daten.
 
 ---
 
@@ -85,6 +99,7 @@
 | Supabase | USA (Frankfurt-Region) | SCC (Standard Contractual Clauses) |
 | Vercel | USA | SCC |
 | Expo | USA | SCC |
+| Modellanbieter (ADR-019, Entscheidung E3 offen) | **EU/EWR vorausgesetzt** | Keine Drittlandübermittlung vorgesehen. Ein Anbieter mit Verarbeitung außerhalb EU/EWR ist für Personenbezug ausgeschlossen |
 
 ---
 
@@ -98,6 +113,11 @@
 | Access Logs | 1 Jahr (ab Eintrag) | Sicherheitsüberwachung |
 | Push-Tokens | bis Widerruf | Benachrichtigungsservice |
 | Auth-Daten | Vertragsende + 30 Tage | Wartefrist |
+| Hinweise, verworfen oder unbearbeitet | 90 Tage (ab Erzeugung) | Zweck mit Sichtung erledigt (ADR-019, Entwurf) |
+| Hinweise, übernommen als Vorschlag | wie Medizin-Records (Vertragsende + 3 Jahre) | Herkunftsnachweis des Freigabevorschlags (ADR-019, Entwurf) |
+| Aufrufprotokoll Modellaufrufe | 1 Jahr (ab Eintrag) | Rechenschaftspflicht, analog Access Logs (ADR-019, Entwurf) |
+| Kennzeichen Vorbefüllung | wie Check-In-Daten | Teil des Check-ins (ADR-019, Entwurf) |
+| Prompts, Rohantworten, Antworten Trainerfragen | keine Speicherung | flüchtig; beim Anbieter vertraglich 0 Tage (ADR-019, Entwurf) |
 
 ---
 
@@ -128,6 +148,16 @@
 - Regelmäßige Review der RLS-Policies (pgTAP-Tests)
 - Audit-Metrik (`access_denials` als Compliance-KPI)
 
+### 7.6 KI-Ebene (ADR-019, Entwurf)
+- Kein Modell hat Datenbankzugriff. Modellwerkzeuge sind ausschließlich die rollengeprüften Türen in `public`, aufgerufen mit dem JWT der anfragenden Person
+- Batch-Einordnung nur über eng geschnittene Lese- und Schreibfunktionen, Ergebnisse nur in die medizinseitige Hinweisliste
+- Kein `service_role` Key im Prozess, der ein Modell aufruft
+- Pseudonymisierung im Gateway (Platzhalter statt Namen und IDs, Rückübersetzung serverseitig)
+- Geschlossene Ausgabelisten, Validierung vor dem Speichern, Modellversion festgeschrieben
+- Keine Speicherung von Prompts und Rohantworten, Request-Bodies im Gateway nicht geloggt
+- Keine automatisierte Entscheidung (Art. 22): jede Konsequenz setzt ein Mensch im protokollierten Freigabepfad
+- Tests: Rollenmatrix Hinweisliste, kein Schreibpfad in Freigaben, Grep auf verbotene Schlüssel in Modellantworten, Löschpfad erfasst die neuen Tabellen
+
 ---
 
 ## 8. Verantwortlicher
@@ -144,6 +174,8 @@
 **Erforderlich:** Ja (Art. 35 DSGVO) — Verarbeitung von Gesundheitsdaten (Art. 9) im großen Maßstab.
 
 **Status:** Wird erstellt / liegt noch nicht vor.
+
+**Nachtrag KI-Ebene (ADR-019, Entwurf):** Die Einordnung von Gesundheitsdaten Beschäftigter durch ein Modell (AP-65) und die modellgestützte Gruppenzuordnung (AP-69) sind in der DSFA eigens zu bewerten. Zusätzlich zu prüfen: Einordnung nach EU AI Act Anhang III Nr. 4 und Mitbestimmung (§ 87 Abs. 1 Nr. 6 BetrVG) über die Betriebsvereinbarung. Livegang der KI-Ebene beim Kunden erst nach dieser Prüfung.
 
 ---
 

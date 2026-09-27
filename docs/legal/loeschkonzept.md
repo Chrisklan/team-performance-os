@@ -17,6 +17,11 @@ Dieses Dokument beschreibt die technische und organisatorische Umsetzung der Lö
 >
 > Die Darstellungspräferenz `app.persons.body_map_figure` fällt beim Shred auf die Vorgabe `aus_dem_team` zurück. Sie ist kein Geschlechtsfeld, an einer pseudonymisierten Zeile wäre sie aber eine Restangabe ohne Zweck.
 
+> **Nachtrag 2026-09-27 (AP-60, ADR-019, Entwurf, noch nicht angenommen), KI-Ebene:** Die KI-Ebene führt drei neue gespeicherte Datenkategorien ein: die medizinseitige Hinweisliste (`app.signal_hints`, Arbeitsname, Art. 9), das Aufrufprotokoll der Modellaufrufe (`app.model_call_log`, Arbeitsname, ohne Inhalt) und ein Kennzeichen „vorbefüllt / geändert" am Check-in. Prompts, an das Modell gesendete Rohtexte, Rohantworten, Reasoning-Spuren, Antworten auf Trainerfragen und Diktat-Audio werden **nicht gespeichert** und brauchen deshalb keinen Löschpfad in TPOS.
+>
+> `app.rpc_shred_person` muss beide neuen Tabellen erfassen, sobald sie entstehen: als **betroffene Person** vollständig löschen (Hinweise über sie, Protokollzeilen über sie), als **Handelnde** pseudonymisieren (wer einen Hinweis übernommen oder verworfen hat, wer einen Trainer-Query ausgelöst hat), analog zu `actor_id`, `set_by`, `proposed_by`. Wie bei AP-43 gilt das als belegt erst durch einen pgTAP-Test mit markantem Wert, der nach dem Shred im gesamten Protokoll, einschließlich der Kopien des Audit-Triggers, null Mal gefunden wird (ADR-019 §5.2, T6). Das Kennzeichen am Check-in fällt mit der Check-in-Zeile.
+>
+> **Beim Modellanbieter** kann TPOS nicht per RPC löschen. Deshalb ist vertraglich zugesicherte Nichtspeicherung (Zero Data Retention, kein Training, auch keine Missbrauchsprotokolle mit Inhalt) Voraussetzung für jeden Anbieter (ADR-019 §3.6). Bei Betrieb in eigener Infrastruktur dürfen Modell-Eingaben außerhalb der Datenbank nicht dauerhaft vorgehalten werden (kein persistenter Prompt- oder Antwort-Cache).
 
 ### 2.1 Standard-Löschung (Soft Delete + Cascade)
 
@@ -52,6 +57,9 @@ UPDATE public.medical_records SET diagnosis = NULL, symptoms = NULL, treatment =
 - `public.fines` (Strafen)
 - `public.wearable_samples` (Biometrie-Rohdaten)
 - `public.video_clips` (Video-Referenzen)
+- `app.signal_hints` (Hinweise über die Person, Art. 9) — ADR-019, Entwurf
+- `app.model_call_log` (Protokollzeilen, in denen die Person Betroffene ist) — ADR-019, Entwurf
+- ggf. medizinseitige Freitext-Tabelle (nur falls ADR-019 Entscheidung E5 angenommen wird)
 
 ### 2.2 Kryptografisches Shredding (Pseudonymisierung)
 
@@ -63,6 +71,10 @@ UPDATE app.audit_log SET actor_id = NULL WHERE actor_id = :person_id;
 UPDATE app.access_denials SET actor_id = NULL WHERE actor_id = :person_id;
 UPDATE public.access_log SET viewer_profile_id = NULL WHERE viewer_profile_id = :profile_id;
 ```
+
+**Ergänzung (ADR-019, Entwurf):**
+- `app.signal_hints`: Bearbeiter (übernommen/verworfen durch) auf NULL, wenn die Person Handelnde war — ADR-019, Entwurf
+- `app.model_call_log`: Auslöser auf NULL, wenn die Person Handelnde war — ADR-019, Entwurf
 
 **Hinweis:** Kryptografisches Shredding ist **Pseudonymisierung**, keine Anonymisierung (Art. 4 Nr. 5 DSGVO). Die Daten bleiben im System, sind aber nicht mehr einer natürlichen Person zuordenbar.
 
@@ -91,6 +103,12 @@ DELETE FROM app.access_denials WHERE occurred_at < NOW() - INTERVAL '1 year';
 | Access Logs | 1 Jahr | Eintrag | Sicherheitsüberwachung |
 | Push-Tokens | bis Widerruf | Registrierung | Benachrichtigungsservice |
 | Auth-Daten | 30 Tage | Vertragsende | Wartefrist für Wiederaufnahme |
+| Hinweise, verworfen oder unbearbeitet | 90 Tage | Erzeugung | Zweck mit der Sichtung erledigt, ein verworfener Maschinenhinweis trägt keinen weiteren Zweck (Art. 5 Abs. 1 lit. e) (ADR-019, Entwurf) |
+| Hinweise, übernommen als Vorschlag | 3 Jahre | Vertragsende | Herkunftsnachweis des Freigabevorschlags, gleiche Frist wie Medizin-Records (ADR-019, Entwurf) |
+| Aufrufprotokoll Modellaufrufe | 1 Jahr | Eintrag | Rechenschaftspflicht, analog Access Logs, enthält keinen Inhalt (ADR-019, Entwurf) |
+| Kennzeichen Vorbefüllung | 12 Monate | Vertragsende | Teil des Check-ins (ADR-019, Entwurf) |
+| Check-in-Freitext (nur falls E5 angenommen wird) | 12 Monate, kürzere Frist prüfen | Vertragsende | Art. 9, Sichtungszweck ist nach Einordnung weitgehend erfüllt (ADR-019, Entwurf) |
+| Prompts, Rohantworten, Antworten Trainerfragen | keine Speicherung | — | flüchtig; beim Anbieter vertraglich 0 Tage (ADR-019, Entwurf) |
 
 ---
 
@@ -111,7 +129,7 @@ In diesen Fällen erfolgt **Pseudonymisierung** statt Löschung.
 | Rolle | Aufgabe |
 |-------|---------|
 | **Admin** | Löschung anstoßen (via Supabase Dashboard oder RPC) |
-| **Arzt** | Medizin-Records prüfen vor Löschung |
+| **Arzt / Physio** | Medizin-Records prüfen vor Löschung; offene Hinweise vor Ablauf der 90 Tage sichten oder verwerfen, übernommene Hinweise sind Teil der Medizin-Records-Prüfung vor Löschung (ADR-019, Entwurf) |
 | **Datenschutz** | Löschung dokumentieren, Bestätigung an Betroffenen senden |
 | **Supabase** | Automatische CASCADE-Löschung via FK-Constraints |
 
@@ -184,6 +202,8 @@ SELECT cron.schedule(
   $$DELETE FROM app.access_denials WHERE occurred_at < NOW() - INTERVAL '1 year'$$
 );
 ```
+
+Zwei weitere tägliche Retention-Einträge folgen mit dem umsetzenden AP (AP-65/66, ADR-019): verworfene und unbearbeitete Hinweise nach 90 Tagen, Aufrufprotokoll nach 1 Jahr. Muster wie die bestehenden Einträge oben.
 
 ---
 
