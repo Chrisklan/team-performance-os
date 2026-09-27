@@ -14,12 +14,16 @@
 -- bestehenden Nachtlaeufe (Baseline-Engine, LoadDeviation) strukturell nicht
 -- beruehrt. Vierte Review-Runde: ACWR-Mittelwerte team-gefiltert nach
 -- Teamwechsel (9f) und Team-Mismatch ohne JWT-Claims im Cron-Kontext (9g).
+-- Fuenfte Runde: der Nachtlauf schliesst den Vortag ab und belegt heute nie
+-- mit einer 0 (9), Integrationstest Nachtlauf -> Baseline -> Deviation ->
+-- LoadDeviation ohne session_load.below-Fehlalarm inkl. Gegenprobe (9h),
+-- Neuberechnung beider Tage beim Verschieben einer Einheit (9i).
 -- Laeuft in einer Transaktion und rollt zurueck, tpos_gate_test bleibt leer.
 -- =============================================================================
 
 BEGIN;
 SET search_path = public, pgtap;
-SELECT plan(102);
+SELECT plan(131);
 
 INSERT INTO app.teams (id, name, timezone) VALUES
   ('f6000000-0000-0000-0000-000000000001','Team F6','Europe/Berlin'),
@@ -490,7 +494,8 @@ SELECT ok(
 RESET ROLE;
 
 -- -----------------------------------------------------------------------------
--- 9. acute_chronic_ratio: Division durch Null -> NULL, kein Fehler
+-- 9. app.cron_training_load: schliesst den VORTAG ab (fuenfte Runde), nie
+--    heute. acute_chronic_ratio: Division durch Null -> NULL, kein Fehler.
 -- -----------------------------------------------------------------------------
 SELECT lives_ok(
   $$SELECT app.cron_training_load()$$,
@@ -499,16 +504,45 @@ SELECT lives_ok(
 
 SELECT is(
   (SELECT acute_chronic_ratio FROM app.daily_checkins
-    WHERE person_id = 'f6100000-0000-0000-0000-000000000005' AND date = current_date),
+    WHERE person_id = 'f6100000-0000-0000-0000-000000000005' AND date = current_date - 1),
   NULL,
-  'Spieler5 ohne jede Trainingslast: chronic = 0 -> acute_chronic_ratio ist NULL, kein Fehler'
+  'Spieler5 ohne jede Trainingslast: chronic = 0 -> acute_chronic_ratio (Vortag) ist NULL, kein Fehler'
 );
 
 SELECT is(
   (SELECT session_load FROM app.daily_checkins
-    WHERE person_id = 'f6100000-0000-0000-0000-000000000005' AND date = current_date),
+    WHERE person_id = 'f6100000-0000-0000-0000-000000000005' AND date = current_date - 1),
   0.000,
-  'Spieler5 ohne Training: session_load ist 0, nicht NULL (Ruhetag zaehlt als 0, keine fehlende Beobachtung)'
+  'Spieler5 ohne Training: session_load des abgeschlossenen Vortags ist 0, nicht NULL (Ruhetag zaehlt als 0)'
+);
+
+-- Fuenfte Runde (HOCH): der Nachtlauf darf den HEUTIGEN Tag nicht vorzeitig
+-- mit einer 0 belegen -- sonst bewertet die Baseline-Engine um 03:00 eine
+-- kuenstliche 0 und erzeugt taeglich einen session_load.below-Fehlalarm.
+SELECT ok(
+  NOT EXISTS (
+    SELECT 1 FROM app.daily_checkins
+     WHERE person_id = 'f6100000-0000-0000-0000-000000000005' AND date = current_date
+  ),
+  'Fuenfte Runde: Spieler5 (kein Training, keine RPE) hat nach dem Nachtlauf KEINE Zeile fuer heute'
+);
+SELECT is(
+  (SELECT count(*)::int FROM app.daily_checkins
+    WHERE date = current_date AND session_load = 0),
+  0,
+  'Fuenfte Runde: nach dem Nachtlauf existiert fuer heute keine einzige Zeile mit session_load = 0'
+);
+SELECT is(
+  (SELECT session_load FROM app.daily_checkins
+    WHERE person_id = 'f6100000-0000-0000-0000-000000000001' AND date = current_date),
+  525.000,
+  'Fuenfte Runde: Spieler1s heutige echte Last (aus RPE, 525) bleibt vom Nachtlauf unberuehrt'
+);
+SELECT is(
+  (SELECT acute_chronic_ratio FROM app.daily_checkins
+    WHERE person_id = 'f6100000-0000-0000-0000-000000000001' AND date = current_date),
+  NULL,
+  'Fuenfte Runde: der Nachtlauf schreibt keine ACWR auf den heutigen, noch offenen Tag'
 );
 
 -- Security-Review Fund 1 (Teil 2): die Cron-Schleife ist jetzt auf Rolle
@@ -517,7 +551,7 @@ SELECT is(
 SELECT ok(
   NOT EXISTS (
     SELECT 1 FROM app.daily_checkins
-     WHERE person_id = 'f6100000-0000-0000-0000-000000000002' AND date = current_date
+     WHERE person_id = 'f6100000-0000-0000-0000-000000000002' AND date >= current_date - 1
   ),
   'Security-Review Fund 1: Coach (Staff) bekommt vom Nachtlauf keine daily_checkins-Zeile (Schleife nur noch Rolle player)'
 );
@@ -532,9 +566,9 @@ SELECT ok(
 -- -----------------------------------------------------------------------------
 SELECT is(
   (SELECT team_id FROM app.daily_checkins
-    WHERE person_id = 'f6100000-0000-0000-0000-000000000005' AND date = current_date),
+    WHERE person_id = 'f6100000-0000-0000-0000-000000000005' AND date = current_date - 1),
   'f6000000-0000-0000-0000-000000000001'::uuid,
-  'Vorbedingung: Spieler5s heutige Zeile gehoert noch Team F6'
+  'Vorbedingung: Spieler5s Vortagszeile (vom Nachtlauf) gehoert noch Team F6'
 );
 
 UPDATE app.persons SET team_id = 'f6000000-0000-0000-0000-000000000008'
@@ -559,7 +593,7 @@ SELECT is(
 );
 
 SELECT lives_ok(
-  $$SELECT app._compute_daily_session_load('f6100000-0000-0000-0000-000000000005', current_date)$$,
+  $$SELECT app._compute_daily_session_load('f6100000-0000-0000-0000-000000000005', current_date - 1)$$,
   'Aufruf nach simuliertem Teamwechsel laeuft ohne Exception (kein Abbruch des Cron-Laufs fuer andere Personen)'
 );
 
@@ -571,13 +605,13 @@ SELECT is(
 
 SELECT is(
   (SELECT team_id FROM app.daily_checkins
-    WHERE person_id = 'f6100000-0000-0000-0000-000000000005' AND date = current_date),
+    WHERE person_id = 'f6100000-0000-0000-0000-000000000005' AND date = current_date - 1),
   'f6000000-0000-0000-0000-000000000001'::uuid,
   'Fund 2: die bestehende Zeile bleibt beim ALTEN Team F6 -- kein Ueberschreiben mit dem neuen Team F6b'
 );
 SELECT is(
   (SELECT count(*)::int FROM app.daily_checkins
-    WHERE person_id = 'f6100000-0000-0000-0000-000000000005' AND date = current_date),
+    WHERE person_id = 'f6100000-0000-0000-0000-000000000005' AND date = current_date - 1),
   1, 'Fund 2: es entsteht keine zweite Zeile fuer das neue Team (unique ist auf person_id+date, nicht team_id)'
 );
 
@@ -604,7 +638,7 @@ SELECT is(
   (SELECT (m -> 'hasCheckIn')::boolean FROM jsonb_array_elements(app.rpc_morning_ops() -> 'members') m
     WHERE m #>> '{player,id}' = 'f6100000-0000-0000-0000-000000000005'),
   false,
-  'Fund 1: Spieler5 hat nur eine vom Nachtlauf angelegte Zeile (session_load=0) -> hasCheckIn bleibt false'
+  'Fund 1: Spieler5 hat nur eine vom Nachtlauf angelegte Lastzeile (Vortag, session_load=0), heute gar keine -> hasCheckIn bleibt false'
 );
 RESET ROLE;
 
@@ -646,15 +680,24 @@ SELECT is(
 --     auftauchen. Positivkontrolle mit Spieler3, die/der in Abschnitt 9c
 --     bereits einen echten Check-in abgegeben hat.
 -- -----------------------------------------------------------------------------
+-- Fuenfte Runde: die reine Lastzeile vom Nachtlauf liegt jetzt auf dem
+-- Vortag, deshalb laufen beide Abfragen ueber Vortag bis heute (2 Tage).
+SELECT ok(
+  EXISTS (SELECT 1 FROM app.daily_checkins
+           WHERE person_id = 'f6100000-0000-0000-0000-000000000005' AND date = current_date - 1
+             AND checkin_submitted_at IS NULL),
+  'Vorbedingung: Spieler5 hat eine reine Trainingslast-Zeile (Vortag, ohne checkin_submitted_at) im Abfragefenster'
+);
+
 SET ROLE authenticated;
 SELECT app._t38_jwt('f6100000-0000-0000-0000-000000000005', 'player');
 SELECT is(
-  (SELECT jsonb_array_length(app.rpc_check_ins_medical('f6100000-0000-0000-0000-000000000005', current_date, current_date) -> 'checkins')),
+  (SELECT jsonb_array_length(app.rpc_check_ins_medical('f6100000-0000-0000-0000-000000000005', current_date - 1, current_date) -> 'checkins')),
   0,
   'Fund 1-Rest: reine Trainingslast-Zeile (Spieler5) erscheint NICHT in rpc_check_ins_medical'
 );
 SELECT is(
-  (SELECT jsonb_array_length(app.rpc_my_body_map_history(1) -> 'checkins')),
+  (SELECT jsonb_array_length(app.rpc_my_body_map_history(2) -> 'checkins')),
   0,
   'Fund 1-Rest: dieselbe Zeile erscheint NICHT im checkins-Array von rpc_my_body_map_history'
 );
@@ -663,14 +706,14 @@ RESET ROLE;
 SET ROLE authenticated;
 SELECT app._t38_jwt('f6100000-0000-0000-0000-000000000003', 'player');
 SELECT is(
-  (SELECT jsonb_array_length(app.rpc_check_ins_medical('f6100000-0000-0000-0000-000000000003', current_date, current_date) -> 'checkins')),
+  (SELECT jsonb_array_length(app.rpc_check_ins_medical('f6100000-0000-0000-0000-000000000003', current_date - 1, current_date) -> 'checkins')),
   1,
-  'Positivkontrolle: Spieler3s echter Check-in erscheint weiterhin in rpc_check_ins_medical'
+  'Positivkontrolle: Spieler3s echter Check-in erscheint weiterhin in rpc_check_ins_medical (Vortags-Lastzeile nicht)'
 );
 SELECT is(
-  (SELECT jsonb_array_length(app.rpc_my_body_map_history(1) -> 'checkins')),
+  (SELECT jsonb_array_length(app.rpc_my_body_map_history(2) -> 'checkins')),
   1,
-  'Positivkontrolle: Spieler3s echter Check-in erscheint weiterhin im checkins-Array von rpc_my_body_map_history'
+  'Positivkontrolle: Spieler3s echter Check-in erscheint weiterhin im checkins-Array von rpc_my_body_map_history (Vortags-Lastzeile nicht)'
 );
 RESET ROLE;
 
@@ -678,12 +721,12 @@ RESET ROLE;
 -- 9e. Dritte Review-Runde, Fund 2-Rest: die ACWR-Schleife in app.cron_
 --     training_load() hatte keinen Teamfilter im finalen UPDATE. Simulierter
 --     abgeschlossener Teamwechsel (persons.team_id UND role_assignments.
---     team_id zeigen schon auf das neue Team F6b), aber die heutige
---     daily_checkins-Zeile ist noch vom alten Team F6 (z.B. von vor dem
---     Wechsel am selben Tag) -- das UPDATE darf diese Zeile NICHT treffen.
+--     team_id zeigen schon auf das neue Team F6b), aber die as_of-Zeile
+--     (seit der fuenften Runde der Vortag) ist noch vom alten Team F6 -- das
+--     UPDATE darf diese Zeile NICHT treffen.
 -- -----------------------------------------------------------------------------
 UPDATE app.daily_checkins SET acute_chronic_ratio = 9.999
- WHERE person_id = 'f6100000-0000-0000-0000-000000000003' AND date = current_date;
+ WHERE person_id = 'f6100000-0000-0000-0000-000000000003' AND date = current_date - 1;
 
 UPDATE app.role_assignments SET team_id = 'f6000000-0000-0000-0000-000000000008'
  WHERE person_id = 'f6100000-0000-0000-0000-000000000003' AND role = 'player' AND valid_to IS NULL;
@@ -697,9 +740,9 @@ SELECT lives_ok(
 
 SELECT is(
   (SELECT acute_chronic_ratio FROM app.daily_checkins
-    WHERE person_id = 'f6100000-0000-0000-0000-000000000003' AND date = current_date),
+    WHERE person_id = 'f6100000-0000-0000-0000-000000000003' AND date = current_date - 1),
   9.999,
-  'Fund 2-Rest: das ACWR-UPDATE trifft die heutige Zeile des ALTEN Teams nach einem Teamwechsel NICHT (Sentinel-Wert unveraendert)'
+  'Fund 2-Rest: das ACWR-UPDATE trifft die Vortagszeile des ALTEN Teams nach einem Teamwechsel NICHT (Sentinel-Wert unveraendert)'
 );
 
 -- Aufraeumen: Spieler3 zurueck ins Team F6, fuer den Rest der Suite.
@@ -714,9 +757,11 @@ UPDATE app.persons SET team_id = 'f6000000-0000-0000-0000-000000000001'
 --     AKTUELLE Team der Person filtern. Spieler7 hat den Teamwechsel F6 ->
 --     F6b bereits abgeschlossen (persons.team_id und role_assignments zeigen
 --     auf F6b), aber Zeilen des ALTEN Teams F6 aus der Zeit vor dem Wechsel
---     liegen noch im 7-/28-Tage-Fenster (Sentinel-Last 1000).
---       neues Team F6b: Tag -12 = 400, Tag -1 = 100, heute = 0 (Nachtlauf)
---       altes Team F6:  Tag -10 = 1000, Tag -3 = 1000 (Sentinel)
+--     liegen noch im 7-/28-Tage-Fenster (Sentinel-Last 1000). Seit der
+--     fuenften Runde ist as_of der Vortag (Tag -1), die Fixture liegt
+--     deshalb einen Tag weiter zurueck als in Runde 4:
+--       neues Team F6b: Tag -13 = 400, Tag -2 = 100, Tag -1 = 0 (Nachtlauf)
+--       altes Team F6:  Tag -11 = 1000, Tag -4 = 1000 (Sentinel)
 --     mit Teamfilter:  acute = (100+0)/2 = 50, chronic = (400+100+0)/3
 --                      = 166.667 -> ratio 0.300
 --     ohne Teamfilter: acute = (1000+100+0)/3 = 366.667, chronic =
@@ -728,10 +773,10 @@ INSERT INTO app.role_assignments (team_id, person_id, role, valid_from, valid_to
   ('f6000000-0000-0000-0000-000000000008','f6100000-0000-0000-0000-000000000007','player', now() - interval '90 days', NULL);
 
 INSERT INTO app.daily_checkins (team_id, person_id, date, session_load) VALUES
-  ('f6000000-0000-0000-0000-000000000008','f6100000-0000-0000-0000-000000000007', current_date - 12,  400),
-  ('f6000000-0000-0000-0000-000000000008','f6100000-0000-0000-0000-000000000007', current_date - 1,   100),
-  ('f6000000-0000-0000-0000-000000000001','f6100000-0000-0000-0000-000000000007', current_date - 10, 1000),
-  ('f6000000-0000-0000-0000-000000000001','f6100000-0000-0000-0000-000000000007', current_date - 3,  1000);
+  ('f6000000-0000-0000-0000-000000000008','f6100000-0000-0000-0000-000000000007', current_date - 13,  400),
+  ('f6000000-0000-0000-0000-000000000008','f6100000-0000-0000-0000-000000000007', current_date - 2,   100),
+  ('f6000000-0000-0000-0000-000000000001','f6100000-0000-0000-0000-000000000007', current_date - 11, 1000),
+  ('f6000000-0000-0000-0000-000000000001','f6100000-0000-0000-0000-000000000007', current_date - 4,  1000);
 
 SELECT lives_ok(
   $$SELECT app.cron_training_load()$$,
@@ -740,14 +785,14 @@ SELECT lives_ok(
 
 SELECT is(
   (SELECT team_id FROM app.daily_checkins
-    WHERE person_id = 'f6100000-0000-0000-0000-000000000007' AND date = current_date),
+    WHERE person_id = 'f6100000-0000-0000-0000-000000000007' AND date = current_date - 1),
   'f6000000-0000-0000-0000-000000000008'::uuid,
-  'Vorbedingung: Spieler7s heutige Zeile (vom Nachtlauf angelegt) gehoert dem neuen Team F6b'
+  'Vorbedingung: Spieler7s Vortagszeile (vom Nachtlauf angelegt) gehoert dem neuen Team F6b'
 );
 
 SELECT is(
   (SELECT acute_chronic_ratio FROM app.daily_checkins
-    WHERE person_id = 'f6100000-0000-0000-0000-000000000007' AND date = current_date),
+    WHERE person_id = 'f6100000-0000-0000-0000-000000000007' AND date = current_date - 1),
   0.300,
   'Fund 1-Rest: acute/chronic-Mittel beziehen nur Tage des aktuellen Teams ein (0.300, ohne Teamfilter waere es 0.733)'
 );
@@ -759,14 +804,17 @@ SELECT is(
 --     darf nicht abbrechen und meldet den Mismatch per RAISE WARNING
 --     (non-fatal, von pgTAP nicht abfangbar, daher strukturell geprueft).
 --     Fixture: Spieler7 (inzwischen Team F6b) hat fuer die F6-Einheit
---     "Grenzfall innerhalb" (vor 2 Tagen) noch einen RPE-Eintrag des ALTEN
+--     "Grenzfall ausserhalb" (vor 3 Tagen; Tag -2 ist seit der fuenften
+--     Runde durch die 9f-Fixture belegt) noch einen RPE-Eintrag des ALTEN
 --     Teams F6 und eine daily_checkins-Zeile des alten Teams (Sentinel 777).
+--     RPE direkt als Superuser eingefuegt, das Zeitfenster der Tuer spielt
+--     hier keine Rolle.
 -- -----------------------------------------------------------------------------
 INSERT INTO app.session_rpe (team_id, person_id, session_id, rpe, duration_min)
 SELECT 'f6000000-0000-0000-0000-000000000001', 'f6100000-0000-0000-0000-000000000007', ts.id, 5, 60
-  FROM app.training_sessions ts WHERE ts.goal_text = 'Grenzfall innerhalb';
+  FROM app.training_sessions ts WHERE ts.goal_text = 'Grenzfall ausserhalb';
 INSERT INTO app.daily_checkins (team_id, person_id, date, session_load) VALUES
-  ('f6000000-0000-0000-0000-000000000001','f6100000-0000-0000-0000-000000000007', current_date - 2, 777);
+  ('f6000000-0000-0000-0000-000000000001','f6100000-0000-0000-0000-000000000007', current_date - 3, 777);
 
 -- JWT-Claims aus frueheren Abschnitten entfernen (set_config(..., true) gilt
 -- transaktionsweit) -- simuliert den Cron-Kontext ohne Request.
@@ -778,19 +826,19 @@ SELECT ok(
 );
 
 SELECT is(
-  app._compute_daily_session_load('f6100000-0000-0000-0000-000000000007', current_date - 2),
+  app._compute_daily_session_load('f6100000-0000-0000-0000-000000000007', current_date - 3),
   NULL::numeric,
   'Fund 2-Rest: Team-Mismatch ohne JWT-Claims liefert NULL'
 );
 
 SELECT lives_ok(
-  $$SELECT app._compute_daily_session_load('f6100000-0000-0000-0000-000000000007', current_date - 2)$$,
+  $$SELECT app._compute_daily_session_load('f6100000-0000-0000-0000-000000000007', current_date - 3)$$,
   'Fund 2-Rest: Team-Mismatch ohne JWT-Claims bricht nicht ab (RAISE WARNING ist non-fatal)'
 );
 
 SELECT is(
   (SELECT session_load FROM app.daily_checkins
-    WHERE person_id = 'f6100000-0000-0000-0000-000000000007' AND date = current_date - 2),
+    WHERE person_id = 'f6100000-0000-0000-0000-000000000007' AND date = current_date - 3),
   777.000,
   'Fund 2-Rest: die Zeile des alten Teams bleibt unveraendert (Sentinel 777, kein Ueberschreiben)'
 );
@@ -806,6 +854,210 @@ SELECT ok(
   (SELECT prosrc FROM pg_proc WHERE oid = 'app._compute_daily_session_load(uuid,date)'::regprocedure)
     ~ 'RAISE WARNING ''app\._compute_daily_session_load: Team-Mismatch',
   'Fund 2-Rest: _compute_daily_session_load meldet den Team-Mismatch per RAISE WARNING (claims-unabhaengige Spur im Postgres-Log)'
+);
+
+-- -----------------------------------------------------------------------------
+-- 9h. Fuenfte Runde (HOCH), Integrationstest ueber die ganze Nachtkette:
+--     02:30 app.cron_training_load -> 03:00 app._compute_baseline + app.
+--     rpc_compute_deviations -> 03:30 app.rpc_compute_load_deviations.
+--     Spieler10 trainiert regelmaessig (28 Tage je 480), die Einheit von
+--     gestern ist per RPE gemeldet, die Einheit von heute hat noch nicht
+--     stattgefunden (keine RPE). Erwartung: KEIN session_load.below-
+--     Fehlalarm fuer heute. Gegenprobe am Ende: wird fuer heute eine 0
+--     angelegt (das alte Verhalten), entsteht genau dieser Fehlalarm -- der
+--     Test ist also scharf, nicht zufaellig gruen.
+-- -----------------------------------------------------------------------------
+INSERT INTO app.persons (id, team_id, display_name, person_position, auth_user_id, is_active) VALUES
+  ('f6100000-0000-0000-0000-00000000000a','f6000000-0000-0000-0000-000000000001','Spieler10 F6 (trainiert regelmaessig)','mittelfeld','f6100000-0000-0000-0000-00000000000a',true);
+INSERT INTO app.role_assignments (team_id, person_id, role, valid_from, valid_to) VALUES
+  ('f6000000-0000-0000-0000-000000000001','f6100000-0000-0000-0000-00000000000a','player', now() - interval '90 days', NULL);
+
+-- Historie Tag -28 bis Tag -2: jeden Tag 480 (RPE 6 x 80 min).
+INSERT INTO app.daily_checkins (team_id, person_id, date, session_load)
+SELECT 'f6000000-0000-0000-0000-000000000001', 'f6100000-0000-0000-0000-00000000000a', current_date - g, 480
+  FROM generate_series(2, 28) g;
+
+INSERT INTO app.training_sessions (team_id, session_date, duration_min, session_type, goal_text) VALUES
+  ('f6000000-0000-0000-0000-000000000001', current_date - 1, 80, 'field', '9h gestern'),
+  ('f6000000-0000-0000-0000-000000000001', current_date,     80, 'field', '9h heute, noch nicht trainiert');
+INSERT INTO app.session_rpe (team_id, person_id, session_id, rpe, duration_min)
+SELECT 'f6000000-0000-0000-0000-000000000001', 'f6100000-0000-0000-0000-00000000000a', ts.id, 6, 80
+  FROM app.training_sessions ts WHERE ts.goal_text = '9h gestern';
+
+SELECT lives_ok(
+  $$SELECT app.cron_training_load()$$,
+  '9h: Nachtlauf 02:30 laeuft'
+);
+SELECT is(
+  (SELECT session_load FROM app.daily_checkins
+    WHERE person_id = 'f6100000-0000-0000-0000-00000000000a' AND date = current_date - 1),
+  480.000,
+  '9h: der abgeschlossene Vortag bekommt die echte Last aus der RPE (6 x 80 = 480)'
+);
+SELECT ok(
+  NOT EXISTS (SELECT 1 FROM app.daily_checkins
+               WHERE person_id = 'f6100000-0000-0000-0000-00000000000a' AND date = current_date),
+  '9h: fuer heute (Training steht noch aus) legt der Nachtlauf keine Zeile an'
+);
+SELECT is(
+  (SELECT acute_chronic_ratio FROM app.daily_checkins
+    WHERE person_id = 'f6100000-0000-0000-0000-00000000000a' AND date = current_date - 1),
+  1.000,
+  '9h: ACWR bei konstanter Last ist exakt 1.000 (mit einer kuenstlichen 0 fuer heute im Fenster waeren es 0.889)'
+);
+
+SELECT lives_ok(
+  $$SELECT app._compute_baseline('f6000000-0000-0000-0000-000000000001',
+                                 'f6100000-0000-0000-0000-00000000000a',
+                                 'session_load', current_date)$$,
+  '9h: Baseline-Berechnung 03:00 fuer session_load laeuft'
+);
+SELECT is(
+  (SELECT status::text || '/' || median::text FROM app.baselines
+    WHERE person_id = 'f6100000-0000-0000-0000-00000000000a'
+      AND metric = 'session_load' AND as_of = current_date),
+  'ok/480.000',
+  '9h: Baseline 03:00 fuer session_load steht (status ok, Median 480 aus dem Fenster [heute-28, heute-1])'
+);
+SELECT is(
+  (SELECT count(*)::int FROM app.rpc_compute_deviations('f6100000-0000-0000-0000-00000000000a', current_date)
+    WHERE metric = 'session_load'),
+  0,
+  '9h: rpc_compute_deviations erzeugt fuer heute KEINE session_load-Abweichung (kein Wert fuer heute -> uebersprungen)'
+);
+SELECT lives_ok(
+  $$SELECT app.rpc_compute_load_deviations(current_date)$$,
+  '9h: LoadDeviation-Nachtlauf 03:30 laeuft'
+);
+SELECT ok(
+  NOT EXISTS (SELECT 1 FROM app.load_deviations
+               WHERE person_id = 'f6100000-0000-0000-0000-00000000000a' AND metric = 'session_load'),
+  '9h: KEIN session_load.below-Fehlalarm fuer eine regelmaessig trainierende Person'
+);
+
+-- Gegenprobe: das alte Verhalten (0 fuer heute vor dem Training) nachstellen.
+INSERT INTO app.daily_checkins (team_id, person_id, date, session_load)
+VALUES ('f6000000-0000-0000-0000-000000000001', 'f6100000-0000-0000-0000-00000000000a', current_date, 0);
+SELECT ok(
+  (SELECT z <= -1 FROM app.rpc_compute_deviations('f6100000-0000-0000-0000-00000000000a', current_date)
+    WHERE metric = 'session_load'),
+  '9h Gegenprobe: mit einer kuenstlichen 0 fuer heute schlaegt die Baseline-Engine an (z <= -1)'
+);
+SELECT lives_ok(
+  $$SELECT app.rpc_compute_load_deviations(current_date)$$,
+  '9h Gegenprobe: LoadDeviation-Nachtlauf laeuft erneut'
+);
+SELECT is(
+  (SELECT count(*)::int FROM app.load_deviations
+    WHERE person_id = 'f6100000-0000-0000-0000-00000000000a' AND metric = 'session_load'
+      AND date = current_date AND statement_key = 'session_load.below'),
+  1,
+  '9h Gegenprobe: ... und daraus entsteht genau der session_load.below-Fehlalarm, den die fuenfte Runde behebt'
+);
+
+-- -----------------------------------------------------------------------------
+-- 9i. Fuenfte Runde (MITTEL): rpc_update_training_session berechnet
+--     session_load fuer alten und neuen Tag neu, wenn sich session_date einer
+--     Einheit mit bereits abgegebener RPE aendert. Ein offener Tag (heute)
+--     bekommt dabei nie eine 0, sondern NULL.
+-- -----------------------------------------------------------------------------
+INSERT INTO app.persons (id, team_id, display_name, person_position, auth_user_id, is_active) VALUES
+  ('f6100000-0000-0000-0000-00000000000b','f6000000-0000-0000-0000-000000000001','Spieler11 F6 (Verschiebe-Test)','abwehr','f6100000-0000-0000-0000-00000000000b',true);
+INSERT INTO app.role_assignments (team_id, person_id, role, valid_from, valid_to) VALUES
+  ('f6000000-0000-0000-0000-000000000001','f6100000-0000-0000-0000-00000000000b','player', now() - interval '90 days', NULL);
+
+SET ROLE authenticated;
+SELECT app._t38_jwt('f6100000-0000-0000-0000-000000000002', 'coach');
+SELECT ok(
+  NOT app.is_denial(app.rpc_create_training_session(current_date - 1, NULL::time, 50::smallint, 'field'::app.app_session_type, NULL, '9i Verschiebe-Einheit')),
+  '9i Fixture: Coach legt eine Einheit fuer gestern an'
+);
+RESET ROLE;
+
+SET ROLE authenticated;
+SELECT app._t38_jwt('f6100000-0000-0000-0000-00000000000b', 'player');
+SELECT lives_ok(
+  $$SELECT app.rpc_submit_session_rpe((SELECT id FROM app.training_sessions WHERE goal_text = '9i Verschiebe-Einheit'), 6::smallint)$$,
+  '9i Fixture: Spieler11 meldet RPE 6 (6 x 50 = 300)'
+);
+RESET ROLE;
+
+SELECT is(
+  (SELECT session_load FROM app.daily_checkins
+    WHERE person_id = 'f6100000-0000-0000-0000-00000000000b' AND date = current_date - 1),
+  300.000,
+  '9i Vorbedingung: Last 300 liegt auf gestern'
+);
+
+-- Verschieben gestern -> vorgestern.
+SET ROLE authenticated;
+SELECT app._t38_jwt('f6100000-0000-0000-0000-000000000002', 'coach');
+SELECT ok(
+  NOT app.is_denial(app.rpc_update_training_session(
+    (SELECT id FROM app.training_sessions WHERE goal_text = '9i Verschiebe-Einheit'),
+    current_date - 2, NULL::time, 50::smallint, 'field'::app.app_session_type, NULL, '9i Verschiebe-Einheit')),
+  '9i: Coach verschiebt die Einheit auf vorgestern'
+);
+RESET ROLE;
+
+SELECT is(
+  (SELECT session_load FROM app.daily_checkins
+    WHERE person_id = 'f6100000-0000-0000-0000-00000000000b' AND date = current_date - 1),
+  0.000,
+  '9i: alter Tag (gestern, abgeschlossen) wird neu berechnet -> 0, keine Doppelzaehlung'
+);
+SELECT is(
+  (SELECT session_load FROM app.daily_checkins
+    WHERE person_id = 'f6100000-0000-0000-0000-00000000000b' AND date = current_date - 2),
+  300.000,
+  '9i: neuer Tag (vorgestern) traegt jetzt die Last 300'
+);
+
+-- Verschieben vorgestern -> heute.
+SET ROLE authenticated;
+SELECT app._t38_jwt('f6100000-0000-0000-0000-000000000002', 'coach');
+SELECT ok(
+  NOT app.is_denial(app.rpc_update_training_session(
+    (SELECT id FROM app.training_sessions WHERE goal_text = '9i Verschiebe-Einheit'),
+    current_date, NULL::time, 50::smallint, 'field'::app.app_session_type, NULL, '9i Verschiebe-Einheit')),
+  '9i: Coach verschiebt die Einheit auf heute'
+);
+RESET ROLE;
+
+SELECT is(
+  (SELECT session_load FROM app.daily_checkins
+    WHERE person_id = 'f6100000-0000-0000-0000-00000000000b' AND date = current_date - 2),
+  0.000,
+  '9i: vorgestern ist nach dem Wegverschieben 0'
+);
+SELECT is(
+  (SELECT session_load FROM app.daily_checkins
+    WHERE person_id = 'f6100000-0000-0000-0000-00000000000b' AND date = current_date),
+  300.000,
+  '9i: heute traegt die echte Last 300 (echter Wert, keine kuenstliche 0)'
+);
+
+-- Verschieben heute -> gestern: der offene Tag heute darf KEINE 0 bekommen.
+SET ROLE authenticated;
+SELECT app._t38_jwt('f6100000-0000-0000-0000-000000000002', 'coach');
+SELECT ok(
+  NOT app.is_denial(app.rpc_update_training_session(
+    (SELECT id FROM app.training_sessions WHERE goal_text = '9i Verschiebe-Einheit'),
+    current_date - 1, NULL::time, 50::smallint, 'field'::app.app_session_type, NULL, '9i Verschiebe-Einheit')),
+  '9i: Coach verschiebt die Einheit zurueck auf gestern'
+);
+RESET ROLE;
+
+SELECT is(
+  (SELECT session_load FROM app.daily_checkins
+    WHERE person_id = 'f6100000-0000-0000-0000-00000000000b' AND date = current_date - 1),
+  300.000,
+  '9i: gestern traegt wieder die Last 300'
+);
+SELECT ok(
+  (SELECT session_load IS NULL FROM app.daily_checkins
+    WHERE person_id = 'f6100000-0000-0000-0000-00000000000b' AND date = current_date),
+  '9i: der offene Tag heute wird auf NULL zurueckgesetzt, NICHT auf 0 (sonst Fehlalarm um 03:00)'
 );
 
 -- -----------------------------------------------------------------------------

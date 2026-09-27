@@ -30,12 +30,15 @@
 --      nie als Parameter.
 --   4. Erste Bedingung: app.auth_team_id() IS NULL -> deny.
 --
--- RLS auf training_sessions/session_rpe wie bei app.daily_checkins/app.
--- load_deviations (nicht das voll-gesperrte Muster von app.baselines/app.
--- readiness_score): GRANT auf authenticated plus Policies als zweite
--- Sicherheitsebene, tatsaechlicher Schreibweg laeuft ueber die SECURITY
--- DEFINER Tueren (Function-Owner ist Superuser in der Cloud-Migration,
--- umgeht RLS wie ueberall im Projekt).
+-- Rechte/RLS auf training_sessions/session_rpe (Stand nach drei Security-
+-- Review-Runden): authenticated hat NUR GRANT SELECT, gefiltert durch je eine
+-- SELECT-Policy (Team, bei session_rpe zusaetzlich self/Staff/Medizin). Es
+-- gibt KEIN Table-Level-INSERT/UPDATE/DELETE und KEINE INSERT/UPDATE-Policies
+-- mehr -- die frueheren Policies wurden bewusst gedroppt (Fund 3-Rest, siehe
+-- Abschnitte 2 und 3), nicht als "zweite Sicherheitsebene" stehen gelassen.
+-- Der einzige Schreibweg sind die SECURITY DEFINER Tueren (Function-Owner ist
+-- Superuser in der Cloud-Migration, umgeht Tabellenrechte und RLS wie
+-- ueberall im Projekt).
 --
 -- Voraussetzung: 08_reconciling.sql (auth_team_id/auth_person_id/auth_is_staff/
 -- auth_has_role), 09_rpcs.sql (app.daily_checkins), 33_baseline_engine.sql
@@ -52,6 +55,11 @@
 -- korrekt gesperrt sind. Das ist eine Fachentscheidung, die ueber AP-68
 -- hinausgeht (betrifft gleichermassen die bestehenden Schlaf-/Mentalwerte-
 -- Spalten auf derselben Tabelle/Policy) -- nicht in dieser Migration geloest.
+-- Ergaenzung fuenfte Runde (per GRANT in Abschnitt 4 geprueft): seit AP-68
+-- steht auch checkin_submitted_at in der Spaltenfreigabe fuer authenticated
+-- und ist damit ueber dieselbe Policy ebenfalls fuer Mitspieler:innen lesbar
+-- (verraet, OB und WANN jemand seinen Wellness-Check-in abgegeben hat).
+-- Gehoert in dieselbe Backlog-Entscheidung an Chris wie Last/ACWR.
 --
 -- ZUSAETZLICHER FUND, dritte Review-Runde (per Supabase-MCP direkt gegen die
 -- Cloud verifiziert, 2026-09-27): die Annahme "app.daily_checkins INSERT/
@@ -68,7 +76,7 @@
 -- ist checkin_submitted_at (wie session_load/acute_chronic_ratio zuvor)
 -- technisch weiterhin ueber einen direkten Table-Grant faelschbar, falls
 -- PostgREST das app-Schema je exponiert (heute nicht der Fall, PGRST106,
--- siehe Kommentar in backend/35_load_deviation.sql) -- dieselbe Kategorie
+-- Nachweis in backend/26_app_execute_revoke.sql) -- dieselbe Kategorie
 -- Fund wie Fund 3 auf training_sessions/session_rpe, hier aber auf einer
 -- BESTEHENDEN Tabelle mit eigener Migrationshistorie. NICHT in dieser
 -- Runde behoben (ausserhalb des erteilten Auftrags fuer diese Migration,
@@ -84,8 +92,41 @@
 --     app.persons-Teamfilter wie im finalen UPDATE.
 --   * Fund 2-Rest (Spur im Cron-Kontext): app.log_denial ist im Cron-Pfad
 --     (keine JWT-Claims) garantiert ein No-Op. app._compute_daily_session_load
---     wirft bei Team-Mismatch jetzt zusaetzlich ein RAISE WARNING (non-fatal,
---     unabhaengig von Claims, landet im Postgres-Log).
+--     meldet einen Team-Mismatch deshalb zusaetzlich per RAISE WARNING (siehe
+--     Abschnitt 5 fuer die vollstaendige Begruendung).
+--
+-- Fuenfte Runde (2026-09-27, breites Abschlussreview ueber den gesamten
+-- AP-68-Diff auf b7e9b84):
+--   * HOCH, Nachtlauf-Timing: app.cron_training_load schrieb um 02:30 fuer
+--     JEDE Spielerin eine session_load = 0 auf den HEUTIGEN Tag, bevor der Tag
+--     gelebt war. Die Baseline-Engine (03:00) bewertete diese 0 gegen den
+--     28-Tage-Median -> bei regelmaessigem Training taeglich |z| >= 1 und um
+--     03:30 ein session_load.below-Eintrag fuer jede trainierende Person,
+--     ohne spaetere Korrektur (metric_deviations wird nach der RPE-Abgabe
+--     nicht neu berechnet). acute_chronic_ratio war durch die 0 im Fenster
+--     systematisch nach unten verzerrt. Fix: der Nachtlauf schliesst jetzt
+--     den VORTAG ab (current_date - 1), und app._compute_daily_session_load
+--     schreibt fuer einen noch offenen Tag (>= current_date) nie eine 0.
+--     Begruendung der Konvention in Abschnitt 11.
+--   * MITTEL: rpc_update_training_session berechnet session_load fuer alte
+--     und neue session_date neu, wenn sich das Datum einer Einheit mit
+--     bereits abgegebener RPE aendert (Abschnitt 7).
+--   * Kommentar-Inkonsistenzen aus frueheren Runden bereinigt.
+--
+-- BACKLOG (bewusst NICHT in AP-68, beruehrt die Baseline-Engine-Tabellen
+-- selbst): Wertebereich-Luecke zwischen app.daily_checkins.session_load
+-- (numeric(10,3), bis 9 999 999.999) und den nachgelagerten Spalten der
+-- Baseline-Engine: app.baselines.median/mad/sigma/p25/p75/min_val/max_val und
+-- app.metric_deviations.value/delta_abs sind numeric(8,3) (< 100 000),
+-- metric_deviations.z numeric(6,3) (< 1 000) und metric_deviations.delta_pct
+-- numeric(6,2) (< 10 000 %). Am ehesten erreichbar ist delta_pct: eine
+-- Person mit kleinem, aber von 0 verschiedenem Last-Median (z.B. 20 = RPE 1
+-- x 20 min) und einem Tag mit 2020 oder mehr ergibt >= 10 000 % -> numeric
+-- field overflow in app.rpc_compute_deviations, und weil app.cron_baseline_
+-- engine alle Personen in EINER Transaktion rechnet, faellt dann der
+-- gesamte 03:00-Lauf fuer alle aus. Gleiche Fehlerklasse wie backend/37_
+-- load_deviation_overflow_fix.sql. Fix gehoert in eine eigene Migration auf
+-- baselines/metric_deviations (Spalten verbreitern oder delta_pct kappen).
 -- =============================================================================
 
 -- -----------------------------------------------------------------------------
@@ -246,15 +287,16 @@ DROP POLICY IF EXISTS session_rpe_insert_self ON app.session_rpe;
 
 -- Security-Review zu Commit ed04ff8 (2026-09-27), Fund 1 (HOCH): app.
 -- cron_training_load legt/aktualisiert ueber _compute_daily_session_load
--- fuer JEDE aktive Person eine daily_checkins-Zeile ("kein Training -> 0,
--- nicht NULL"). app.rpc_morning_ops (siehe unten, Abschnitt 12) hat
--- hasCheckIn bisher als reine Zeilen-EXISTS-Pruefung berechnet -- ab dem
--- Nachtlauf 02:30 hätte das Trainer-Dashboard fuer JEDE Person "Check-in
--- vorhanden" gemeldet, auch ohne echten Wellness-Check-in. checkin_
--- submitted_at ist die Entkopplung: NUR app.rpc_submit_checkin (Abschnitt
--- 11 unten) setzt sie, _compute_daily_session_load fasst sie nie an (weder
--- INSERT noch UPDATE), hasCheckIn prueft ab jetzt checkin_submitted_at IS
--- NOT NULL statt Zeilen-Existenz.
+-- fuer jede aktive Spielerin eine daily_checkins-Zeile ("kein Training -> 0,
+-- nicht NULL", seit der fuenften Runde fuer den abgeschlossenen Vortag).
+-- app.rpc_morning_ops (siehe unten, Abschnitt 9b) hat hasCheckIn bisher als
+-- reine Zeilen-EXISTS-Pruefung berechnet -- damit haette das Trainer-
+-- Dashboard fuer jede Person mit Lastzeile "Check-in vorhanden" gemeldet,
+-- auch ohne echten Wellness-Check-in. checkin_submitted_at ist die
+-- Entkopplung: NUR app.rpc_submit_checkin (ebenfalls Abschnitt 9b) setzt
+-- sie, _compute_daily_session_load fasst sie nie an (weder INSERT noch
+-- UPDATE), hasCheckIn prueft ab jetzt checkin_submitted_at IS NOT NULL statt
+-- Zeilen-Existenz.
 --
 -- Fund 5 (NIEDRIG): session_load war numeric(8,3) (5 Vorkommastellen) --
 -- die Tagessumme in _compute_daily_session_load kann ab ca. 34 Einheiten an
@@ -307,9 +349,21 @@ GRANT SELECT (id, team_id, person_id, date, sleep_duration_min, sleep_quality,
 -- -----------------------------------------------------------------------------
 -- Summiert session_rpe.session_load fuer person_id+date (Join ueber
 -- session_id -> training_sessions.session_date = p_date, O-02: Last zaehlt
--- auf den Tag der Einheit selbst). Kein Training am Tag -> 0, nicht NULL:
--- ein Ruhetag ist echte, gezaehlte Last-Information fuer die 7/28-Tage-
--- Mittel weiter unten (app.cron_training_load), nicht "keine Beobachtung".
+-- auf den Tag der Einheit selbst). Kein Training an einem ABGESCHLOSSENEN Tag
+-- (p_date < current_date) -> 0, nicht NULL: ein Ruhetag ist echte, gezaehlte
+-- Last-Information fuer die 7/28-Tage-Mittel weiter unten (app.cron_
+-- training_load), nicht "keine Beobachtung".
+--
+-- Fuenfte Runde (2026-09-27): fuer einen noch OFFENEN Tag (p_date >=
+-- current_date) wird NIE eine 0 geschrieben. "Heute noch keine Last" heisst
+-- "noch keine Beobachtung" (NULL), nicht "Ruhetag" -- sonst bewertet die
+-- Baseline-Engine um 03:00 eine kuenstliche 0 gegen den 28-Tage-Median und
+-- erzeugt einen session_load.below-Fehlalarm (siehe Abschnitt 11). Ergibt
+-- die Summe fuer einen offenen Tag 0 (z.B. weil rpc_update_training_session
+-- die einzige Einheit von heute wegverschoben hat), wird eine bestehende
+-- Zeile auf session_load = NULL zurueckgesetzt, aber keine neue Zeile
+-- angelegt. Die 0 fuer diesen Tag schreibt spaeter der Nachtlauf, sobald
+-- der Tag abgeschlossen ist.
 -- Upsert legt bei Bedarf eine daily_checkins-Zeile nur mit team_id/person_id/
 -- date/session_load an (Rest NULL, INSBESONDERE checkin_submitted_at bleibt
 -- immer unberuehrt -- siehe Kommentar auf der Spalte oben), analog zum
@@ -359,6 +413,20 @@ BEGIN
      AND sr.team_id = v_team_id
      AND ts.session_date = p_date;
 
+  -- Offener Tag ohne Last: keine 0 schreiben (fuenfte Runde, siehe oben).
+  -- Nur eine bereits vorhandene Last wird zurueckgenommen, team-gefiltert
+  -- wie der Upsert darunter. Eine Zeile eines anderen Teams bleibt
+  -- unangetastet, hier ohne Spur: es wird ohnehin nichts geschrieben.
+  IF v_load = 0 AND p_date >= current_date THEN
+    UPDATE app.daily_checkins
+       SET session_load = NULL, updated_at = now()
+     WHERE person_id = p_person_id
+       AND date = p_date
+       AND team_id = v_team_id
+       AND session_load IS NOT NULL;
+    RETURN NULL;
+  END IF;
+
   INSERT INTO app.daily_checkins (team_id, person_id, date, session_load)
   VALUES (v_team_id, p_person_id, p_date, v_load)
   ON CONFLICT (person_id, date) DO UPDATE SET
@@ -371,22 +439,20 @@ BEGIN
     -- Team-Mismatch (Silo-Schutz, Fund 2): eine bestehende Zeile gehoert
     -- einem anderen Team als dem aktuellen Team der Person (z.B. nach einem
     -- Teamwechsel) -- kein Schreiben, kein Fehler, kein Abbruch des
-    -- Cron-Laufs fuer andere Personen. Dritte Review-Runde (2026-09-27):
-    -- ein stiller RETURN NULL hinterlaesst keine Spur -- app.log_denial
-    -- schreibt (anders als ein RAISE WARNING, das laut Review nicht in
-    -- cron.job_run_details landet) eine Zeile in app.access_denials, sofern
-    -- JWT-Claims im aktuellen Kontext vorhanden sind (bei einem direkten
-    -- Aufruf aus rpc_submit_session_rpe der Fall, bei einem Cron-Lauf ohne
-    -- Request-Kontext ist es ein bewusstes No-Op von log_denial selbst,
-    -- gleiches Verhalten wie an jeder anderen Stelle im Projekt).
-    -- Vierte Review-Runde (2026-09-27), Fund 2-Rest: genau dieser Cron-Pfad
-    -- (app.cron_training_load, service_role, keine JWT-Claims) ist aber der
-    -- Hauptfall fuer einen Team-Mismatch -- log_denial ist dort garantiert
-    -- ein No-Op (auth_team_id()/auth_person_id() sind NULL). Deshalb
-    -- zusaetzlich RAISE WARNING: unabhaengig von JWT-Claims, landet im
-    -- Postgres-Log (und damit in den Supabase-Postgres-Logs des pg_cron-
-    -- Laufs). WARNING ist non-fatal -- kein Abbruch des Nachtlaufs fuer die
-    -- uebrigen Personen, keine EXCEPTION.
+    -- Cron-Laufs fuer andere Personen.
+    -- Spur (dritte und vierte Runde, zusammengefasst): zwei Kanaele, weil
+    -- keiner allein alle Aufrufpfade abdeckt.
+    --   * app.log_denial schreibt eine Zeile in app.access_denials, aber nur
+    --     mit bestaetigten JWT-Claims im Kontext (Aufruf aus einer Tuer wie
+    --     rpc_submit_session_rpe/rpc_update_training_session). Im Cron-Pfad
+    --     (pg_cron, keine Claims), dem Hauptfall fuer einen Mismatch, ist es
+    --     ein bewusstes No-Op.
+    --   * RAISE WARNING ist claims-unabhaengig und landet im Postgres-Log
+    --     (Supabase-Postgres-Logs des pg_cron-Laufs). Es erscheint NICHT in
+    --     cron.job_run_details (dort steht nur der Erfolg des Statements) --
+    --     deshalb reicht es allein fuer den Tuer-Pfad nicht, und log_denial
+    --     allein reicht nicht fuer den Cron-Pfad. WARNING ist non-fatal: kein
+    --     Abbruch des Nachtlaufs, keine EXCEPTION.
     PERFORM app.log_denial('daily_checkins.team');
     RAISE WARNING 'app._compute_daily_session_load: Team-Mismatch fuer person_id=%, erwartetes Team=%, Zeile bleibt unveraendert',
       p_person_id, v_team_id;
@@ -469,6 +535,16 @@ GRANT  EXECUTE ON FUNCTION app.rpc_create_training_session(date, time, smallint,
 -- -----------------------------------------------------------------------------
 -- 7. app.rpc_update_training_session — Muster D, staff-only, eigenes Team
 -- -----------------------------------------------------------------------------
+-- Fuenfte Runde (2026-09-27, MITTEL): wird session_date einer Einheit
+-- verschoben, fuer die bereits RPE abgegeben wurde, war daily_checkins.
+-- session_load auf beiden Tagen veraltet (alter Tag zaehlte die Last weiter,
+-- neuer Tag kannte sie nicht). Jetzt: fuer jede Person mit RPE auf dieser
+-- Einheit app._compute_daily_session_load fuer alten UND neuen Tag, im
+-- selben Aufruf. duration_min-Aenderungen brauchen das nicht: session_rpe.
+-- duration_min ist bewusst ein Snapshot (Abschnitt 3). Offene Tage (heute
+-- oder spaeter) bekommen dabei nie eine 0, siehe Abschnitt 5. Nicht neu
+-- berechnet wird acute_chronic_ratio vergangener Tage -- dieselbe
+-- Restunschaerfe wie bei spaeter RPE, siehe Abschnitt 11.
 
 CREATE OR REPLACE FUNCTION app.rpc_update_training_session(
   p_session_id         uuid,
@@ -486,8 +562,10 @@ SECURITY DEFINER
 SET search_path = app, pg_temp
 AS $$
 DECLARE
-  v_team_id uuid;
-  v_row     app.training_sessions%rowtype;
+  v_team_id  uuid;
+  v_old_date date;
+  v_row      app.training_sessions%rowtype;
+  r          record;
 BEGIN
   IF app.auth_team_id() IS NULL THEN
     RETURN app.deny('training_sessions.update', 'FORBIDDEN: training_sessions.update');
@@ -517,6 +595,9 @@ BEGIN
     RAISE EXCEPTION 'INVALID: training_sessions.planned_intensity' USING errcode = '22023';
   END IF;
 
+  SELECT session_date INTO v_old_date
+    FROM app.training_sessions WHERE id = p_session_id AND team_id = v_team_id;
+
   UPDATE app.training_sessions SET
     session_date      = p_session_date,
     start_time        = p_start_time,
@@ -528,13 +609,23 @@ BEGIN
   WHERE id = p_session_id AND team_id = v_team_id
   RETURNING * INTO v_row;
 
+  IF v_old_date IS DISTINCT FROM v_row.session_date THEN
+    FOR r IN
+      SELECT DISTINCT sr.person_id FROM app.session_rpe sr WHERE sr.session_id = p_session_id
+    LOOP
+      PERFORM app._compute_daily_session_load(r.person_id, v_old_date);
+      PERFORM app._compute_daily_session_load(r.person_id, v_row.session_date);
+    END LOOP;
+  END IF;
+
   RETURN to_jsonb(v_row);
 END;
 $$;
 
 COMMENT ON FUNCTION app.rpc_update_training_session(uuid, date, time, smallint, app.app_session_type, smallint, text) IS
   'Trainingsplanung (Modul 6, AP-68). Muster D, staff-only, nur eigenes Team. '
-  'Siehe backend/38_training_load.sql.';
+  'Bei geaendertem session_date wird daily_checkins.session_load fuer alten und neuen Tag '
+  'jeder Person mit RPE auf dieser Einheit neu berechnet. Siehe backend/38_training_load.sql.';
 
 REVOKE EXECUTE ON FUNCTION app.rpc_update_training_session(uuid, date, time, smallint, app.app_session_type, smallint, text) FROM PUBLIC, anon;
 GRANT  EXECUTE ON FUNCTION app.rpc_update_training_session(uuid, date, time, smallint, app.app_session_type, smallint, text) TO authenticated;
@@ -1227,11 +1318,53 @@ GRANT EXECUTE ON FUNCTION public.rpc_submit_session_rpe(uuid, smallint) TO authe
 --     loaddeviation_cron.sql, hier direkt im gleichen Paket verdrahtet, damit
 --     der Job vom ersten Tag an existiert statt erneut vergessen zu werden.
 -- -----------------------------------------------------------------------------
--- acute_chronic_ratio: acute = avg(session_load) ueber 7 Tage [as_of-6..as_of],
--- chronic = avg(session_load) ueber 28 Tage [as_of-27..as_of]. chronic = 0
--- oder NULL -> ratio NULL, kein Fehler, keine Division-durch-Null-Exception
--- (COALESCE/NULLIF-frei durch CASE, expliziter als NULLIF(chronic,0) fuer
--- die Lesbarkeit im Test).
+-- Fuenfte Runde (2026-09-27, HOCH): der Nachtlauf schliesst den VORTAG ab,
+-- as_of = current_date - 1, nicht current_date.
+--
+-- Recherche zur bestehenden Timing-Konvention der Baseline-Engine (backend/
+-- 33_baseline_engine.sql, supabase/migrations/20260927082030_wire_baseline_
+-- loaddeviation_cron.sql):
+--   * app.cron_baseline_engine (03:00) rechnet Baselines mit as_of =
+--     current_date ueber das Fenster [as_of-28, as_of-1] (der zu bewertende
+--     Tag ist nie Teil der eigenen Baseline) und bewertet danach per
+--     app.rpc_compute_deviations den HEUTIGEN Tag gegen diese Baseline.
+--   * rpc_compute_deviations ueberspringt eine Metrik, wenn fuer den Tag
+--     kein Wert vorliegt (to_jsonb(dc)->>metric IS NULL -> CONTINUE). Einen
+--     eigenen "Tag ist abgeschlossen"-Mechanismus gibt es nicht, und kein
+--     On-Submit-Pfad ruft rpc_compute_deviations nach einem spaeteren
+--     Check-in erneut auf (einziger Aufrufer ist der 03:00-Cron).
+--   * Fuer Check-in-Metriken (Schlaf, Mentalwerte) heisst das: um 03:00
+--     existiert fuer heute praktisch nie eine Zeile (der Morning-Check-in
+--     ueber rpc_submit_checkin kommt nach dem Aufstehen), die Metrik wird
+--     einfach uebersprungen. Die implizite Konvention lautet also: ein Tag
+--     wird nur bewertet, wenn sein Wert REAL existiert -- es wird nie ein
+--     synthetischer Wert fuer einen noch nicht gelebten Tag angelegt.
+-- Die fruehere Fassung dieses Nachtlaufs brach genau diese Konvention (0 fuer
+-- heute um 02:30, bevor trainiert wurde). Gewaehlte Konvention deshalb: die
+-- Ruhetag-0 und die ACWR werden nur fuer einen ABGESCHLOSSENEN Tag
+-- geschrieben, hier den Vortag, analog zum Fenster [as_of-28, as_of-1] der
+-- Engine. Der heutige Tag bekommt vom Nachtlauf gar nichts (auch
+-- app._compute_daily_session_load schreibt fuer offene Tage nie eine 0,
+-- Abschnitt 5) -- um 03:00 ist session_load fuer heute damit NULL und wird
+-- wie jede noch nicht erhobene Check-in-Metrik uebersprungen. O-02 bleibt
+-- unveraendert: die Last zaehlt weiterhin auf training_sessions.session_date;
+-- geaendert ist nur, WANN der Nachtlauf einen Tag als fertig behandelt.
+--
+-- Restunschaerfe (dokumentiert, strukturell viel kleiner als der alte Bug):
+-- rpc_submit_session_rpe erlaubt RPE bis zu 2 Tage nach session_date. Eine
+-- spaete Abgabe berechnet session_load des betroffenen Tags sofort korrekt
+-- nach (Aufruf von _compute_daily_session_load in der Tuer), aber die
+-- acute_chronic_ratio bereits abgeschlossener Tage (Vortag, Vorvortag) wird
+-- nicht rueckwirkend neu gerechnet. Die ACWR des naechsten Nachtlaufs
+-- enthaelt die nachgereichte Last dagegen vollstaendig. Gleiches gilt nach
+-- rpc_update_training_session (Abschnitt 7). current_date ist die Zeitzone
+-- der DB-Session (wie in der gesamten Baseline-Engine, nicht teams.timezone).
+--
+-- acute_chronic_ratio (as_of = current_date - 1): acute = avg(session_load)
+-- ueber 7 Tage [as_of-6..as_of], chronic = avg(session_load) ueber 28 Tage
+-- [as_of-27..as_of]. chronic = 0 oder NULL -> ratio NULL, kein Fehler, keine
+-- Division-durch-Null-Exception (CASE statt NULLIF(chronic,0), expliziter
+-- fuer die Lesbarkeit im Test).
 --
 -- Security-Review zu Commit ed04ff8 (2026-09-27), Fund 1 (Teil 2): die
 -- Schleife lief ueber JEDE aktive Person, auch Coach/Physio/Arzt/Admin --
@@ -1251,6 +1384,7 @@ SET search_path = app, pg_temp
 AS $$
 DECLARE
   r         record;
+  v_as_of   date := current_date - 1;  -- abgeschlossener Vortag, siehe Kommentar oben
   v_acute   numeric;
   v_chronic numeric;
   v_ratio   numeric(6,3);
@@ -1265,7 +1399,7 @@ BEGIN
             AND ra.valid_from <= now() AND (ra.valid_to IS NULL OR ra.valid_to > now())
        )
   LOOP
-    PERFORM app._compute_daily_session_load(r.person_id, current_date);
+    PERFORM app._compute_daily_session_load(r.person_id, v_as_of);
   END LOOP;
 
   FOR r IN
@@ -1288,13 +1422,13 @@ BEGIN
     SELECT avg(dc.session_load) INTO v_acute
       FROM app.daily_checkins dc
      WHERE dc.person_id = r.person_id
-       AND dc.date BETWEEN current_date - 6 AND current_date
+       AND dc.date BETWEEN v_as_of - 6 AND v_as_of
        AND dc.team_id = (SELECT team_id FROM app.persons WHERE id = r.person_id);
 
     SELECT avg(dc.session_load) INTO v_chronic
       FROM app.daily_checkins dc
      WHERE dc.person_id = r.person_id
-       AND dc.date BETWEEN current_date - 27 AND current_date
+       AND dc.date BETWEEN v_as_of - 27 AND v_as_of
        AND dc.team_id = (SELECT team_id FROM app.persons WHERE id = r.person_id);
 
     v_ratio := CASE
@@ -1305,16 +1439,16 @@ BEGIN
     -- Dritte Review-Runde (2026-09-27), Fund 2-Rest: dieses UPDATE hatte
     -- (anders als der Upsert in app._compute_daily_session_load direkt
     -- darueber) KEINEN Teamfilter. Am Wechseltag einer Person haette die
-    -- Ratio in die heutige Zeile des ALTEN Teams geschrieben werden koennen,
+    -- Ratio in die as_of-Zeile des ALTEN Teams geschrieben werden koennen,
     -- selbst wenn der Teamwechsel schon vollzogen ist (person.team_id zeigt
-    -- bereits auf das neue Team, die Zeile fuer heute gehoert aber noch dem
+    -- bereits auf das neue Team, die Zeile fuer den Tag gehoert aber noch dem
     -- alten). team_id wird bewusst frisch aus app.persons gelesen (nicht aus
     -- einer Variable von oben), damit ein Wechsel zwischen den beiden
     -- Schleifen dieser Funktion ebenfalls korrekt greift.
     UPDATE app.daily_checkins
        SET acute_chronic_ratio = v_ratio, updated_at = now()
      WHERE person_id = r.person_id
-       AND date = current_date
+       AND date = v_as_of
        AND team_id = (SELECT team_id FROM app.persons WHERE id = r.person_id);
   END LOOP;
 END;
@@ -1322,8 +1456,9 @@ $$;
 
 COMMENT ON FUNCTION app.cron_training_load() IS
   'Nachtlauf 02:30 (AP-68, Modul 6): app._compute_daily_session_load fuer alle aktiven '
-  'Personen fuer heute, danach acute_chronic_ratio (7-Tage/28-Tage-Mittel, chronic=0/NULL '
-  '-> ratio NULL). Siehe backend/38_training_load.sql.';
+  'Personen mit Rolle player fuer den abgeschlossenen VORTAG (current_date - 1, nie heute), '
+  'danach acute_chronic_ratio fuer denselben Tag (7-Tage/28-Tage-Mittel bis einschliesslich '
+  'Vortag, chronic=0/NULL -> ratio NULL). Siehe backend/38_training_load.sql.';
 
 REVOKE EXECUTE ON FUNCTION app.cron_training_load() FROM PUBLIC, anon, authenticated;
 GRANT  EXECUTE ON FUNCTION app.cron_training_load() TO service_role;
