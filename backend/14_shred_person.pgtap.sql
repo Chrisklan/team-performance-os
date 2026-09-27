@@ -66,6 +66,32 @@ INSERT INTO app.readiness_scores (team_id, person_id, date, score_total, band, f
 INSERT INTO app.load_deviations (team_id, person_id, metric, date, deviation, state) VALUES
   ('e0000000-0000-0000-0000-000000000001', 'e1000000-0000-0000-0000-000000000004', 'sleep_duration_min', '2026-09-01', 18.25, 'unreviewed');
 
+-- Review-Fund: sechs Tabellen mit person_id/team_id, deren ON DELETE CASCADE
+-- nie greift (persons wird nie geloescht, nur anonymisiert). Je eine Zeile
+-- fuer P, damit der Test bei einem fehlenden DELETE tatsaechlich fehlschlaegt.
+INSERT INTO app.baselines (team_id, person_id, metric, as_of, window_days, n_obs, direction, status) VALUES
+  ('e0000000-0000-0000-0000-000000000001', 'e1000000-0000-0000-0000-000000000004', 'sleep_duration_min', '2026-09-01', 28, 10, 'higher_better', 'ok');
+
+INSERT INTO app.metric_deviations (team_id, person_id, metric, date, value, baseline_id, z, delta_abs, band) VALUES
+  ('e0000000-0000-0000-0000-000000000001', 'e1000000-0000-0000-0000-000000000004', 'sleep_duration_min', '2026-09-01', 6.5,
+   (SELECT id FROM app.baselines WHERE person_id = 'e1000000-0000-0000-0000-000000000004' AND metric = 'sleep_duration_min' AND as_of = '2026-09-01'),
+   1.2, 1.0, 'watch');
+
+INSERT INTO app.readiness_score (id, team_id, person_id, date, value_sport, completeness, status, algo_version) VALUES
+  ('e4000000-0000-0000-0000-000000000001', 'e0000000-0000-0000-0000-000000000001', 'e1000000-0000-0000-0000-000000000004', '2026-09-01', 71, 1.000, 'ok', 'v1');
+
+INSERT INTO app.readiness_factors_coach (score_id, team_id, person_id, date, factor, weight) VALUES
+  ('e4000000-0000-0000-0000-000000000001', 'e0000000-0000-0000-0000-000000000001', 'e1000000-0000-0000-0000-000000000004', '2026-09-01', 'sleep', 0.25000);
+
+INSERT INTO app.readiness_factor_medical (score_id, team_id, person_id, date, value_full, factor, weight) VALUES
+  ('e4000000-0000-0000-0000-000000000001', 'e0000000-0000-0000-0000-000000000001', 'e1000000-0000-0000-0000-000000000004', '2026-09-01', 68, 'pain', 0.25000);
+
+INSERT INTO app.training_sessions (id, team_id, session_date, duration_min) VALUES
+  ('e5000000-0000-0000-0000-000000000001', 'e0000000-0000-0000-0000-000000000001', '2026-09-01', 90);
+
+INSERT INTO app.session_rpe (team_id, person_id, session_id, rpe, duration_min) VALUES
+  ('e0000000-0000-0000-0000-000000000001', 'e1000000-0000-0000-0000-000000000004', 'e5000000-0000-0000-0000-000000000001', 6, 90);
+
 -- Freigabe FUER P, gesetzt VON D.
 INSERT INTO app.medical_clearances (team_id, person_id, status, load_note, valid_from, set_by, set_by_role) VALUES
   ('e0000000-0000-0000-0000-000000000001', 'e1000000-0000-0000-0000-000000000004', 'limited', 'max 60 min', '2026-09-01', 'e1000000-0000-0000-0000-000000000002', 'doctor');
@@ -143,6 +169,14 @@ SELECT is((SELECT count(*) FROM app.readiness_scores WHERE person_id = 'e1000000
 SELECT is((SELECT count(*) FROM app.load_deviations  WHERE person_id = 'e1000000-0000-0000-0000-000000000004'), 0::bigint, 'load_deviations von P sind geloescht');
 SELECT is((SELECT count(*) FROM app.medical_clearances WHERE person_id = 'e1000000-0000-0000-0000-000000000004'), 0::bigint, 'medical_clearances von P sind geloescht (Entscheidung 1)');
 SELECT is((SELECT count(*) FROM app.access_log WHERE subject_id = 'e1000000-0000-0000-0000-000000000004'), 0::bigint, 'access_log: Betroffenenzeilen von P sind geloescht (Entscheidung 2)');
+
+-- Review-Fund: die sechs Tabellen aus Schritt 2b, ON DELETE CASCADE griff nie.
+SELECT is((SELECT count(*) FROM app.baselines               WHERE person_id = 'e1000000-0000-0000-0000-000000000004'), 0::bigint, 'baselines von P sind geloescht (Review-Fund Schritt 2b)');
+SELECT is((SELECT count(*) FROM app.metric_deviations        WHERE person_id = 'e1000000-0000-0000-0000-000000000004'), 0::bigint, 'metric_deviations von P sind geloescht (Review-Fund Schritt 2b)');
+SELECT is((SELECT count(*) FROM app.readiness_score           WHERE person_id = 'e1000000-0000-0000-0000-000000000004'), 0::bigint, 'readiness_score (Singular) von P ist geloescht (Review-Fund Schritt 2b)');
+SELECT is((SELECT count(*) FROM app.readiness_factors_coach   WHERE person_id = 'e1000000-0000-0000-0000-000000000004'), 0::bigint, 'readiness_factors_coach von P sind geloescht (Review-Fund Schritt 2b)');
+SELECT is((SELECT count(*) FROM app.readiness_factor_medical  WHERE person_id = 'e1000000-0000-0000-0000-000000000004'), 0::bigint, 'readiness_factor_medical von P sind geloescht (Review-Fund Schritt 2b)');
+SELECT is((SELECT count(*) FROM app.session_rpe                WHERE person_id = 'e1000000-0000-0000-0000-000000000004'), 0::bigint, 'session_rpe von P ist geloescht (Review-Fund Schritt 2b)');
 
 SELECT is((SELECT display_name FROM app.persons WHERE id = 'e1000000-0000-0000-0000-000000000004') LIKE 'SCRAPED-%', true, 'persons: Anzeigename ist pseudonymisiert');
 SELECT is((SELECT auth_user_id FROM app.persons WHERE id = 'e1000000-0000-0000-0000-000000000004'), NULL, 'persons: auth_user_id ist NULL');
