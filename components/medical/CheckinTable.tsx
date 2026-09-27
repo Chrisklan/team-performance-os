@@ -19,7 +19,7 @@ const COLUMNS = [
   { key: "sleep_quality", label: "Schlafqualität" },
   { key: "recovery", label: "Erholung" },
   { key: "energy", label: "Energie" },
-  { key: "mental_stress", label: "Stress" },
+  { key: "mental_stress", label: "Mentale Anspannung" },
   { key: "mental_mood", label: "Stimmung" },
   { key: "mental_motivation", label: "Motivation" },
   { key: "training_readiness", label: "Bereitschaft" },

@@ -95,7 +95,7 @@ INSERT INTO app.baseline_metric_config (metric, sigma_floor, direction) VALUES
   ('sleep_quality',       0.400, 'higher_better'),
   ('recovery',            0.400, 'higher_better'),
   ('energy',              0.400, 'higher_better'),
-  ('mental_stress',       0.450, 'higher_better'),
+  ('mental_stress',       0.450, 'lower_better'),  -- Richtungsfix 2026-09-27, siehe backend/36_mental_stress_direction.sql: hoehere Anspannung ist schlechter, nicht besser.
   ('mental_mood',         0.450, 'higher_better'),
   ('mental_motivation',   0.450, 'higher_better'),
   ('training_readiness',  0.400, 'higher_better'),
