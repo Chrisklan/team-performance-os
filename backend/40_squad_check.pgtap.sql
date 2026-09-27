@@ -15,7 +15,7 @@
 
 BEGIN;
 SET search_path = public, pgtap;
-SELECT plan(93);
+SELECT plan(111);
 
 -- -----------------------------------------------------------------------------
 -- Fixtures (als Superuser)
@@ -146,7 +146,7 @@ SELECT ok(NOT has_table_privilege('anon', 'app.session_hint_dismissals', 'SELECT
   'anon hat kein SELECT auf session_hint_dismissals');
 SELECT ok(NOT has_function_privilege('authenticated', 'app._squad_check_v1(uuid,date,smallint,smallint,uuid)', 'EXECUTE'),
   'authenticated darf app._squad_check_v1 nicht direkt ausfuehren');
-SELECT ok(NOT has_function_privilege('authenticated', 'app._squad_check_clearance(uuid,uuid)', 'EXECUTE'),
+SELECT ok(NOT has_function_privilege('authenticated', 'app._squad_check_clearance(uuid,uuid,date)', 'EXECUTE'),
   'authenticated darf app._squad_check_clearance nicht direkt ausfuehren');
 SELECT ok(has_function_privilege('authenticated', 'public.rpc_get_session_squad_check(date,smallint,smallint,uuid)', 'EXECUTE'),
   'Tuer rpc_get_session_squad_check fuer authenticated');
@@ -295,6 +295,35 @@ SELECT throws_ok($$ SELECT app.rpc_get_session_squad_check(current_date, 60::sma
 DELETE FROM app.training_sessions WHERE id IN ('a9200000-0000-0000-0000-000000000002','a9200000-0000-0000-0000-000000000003');
 
 -- -----------------------------------------------------------------------------
+-- 5c. Security-Review M1: Freigabe fuer das Datum der Einheit, strengerer Status
+-- -----------------------------------------------------------------------------
+-- P4: blocked erst ab morgen. P7: heute individual, ab morgen wieder full.
+INSERT INTO app.medical_clearances (team_id, person_id, status, valid_from, set_by_role) VALUES
+  ('a9000000-0000-0000-0000-000000000001','a9100000-0000-0000-0000-000000000014','blocked', (current_date + 1)::timestamptz,'doctor'),
+  ('a9000000-0000-0000-0000-000000000001','a9100000-0000-0000-0000-000000000017','full',    (current_date + 1)::timestamptz,'doctor');
+
+CREATE TEMP TABLE t40 AS
+  SELECT app.rpc_get_session_squad_check(current_date + 1, 60::smallint, 6::smallint, NULL) AS r;
+SELECT is((SELECT app._t40_row(r, 'a9100000-0000-0000-0000-000000000014') ->> 'suggestion' FROM t40), 'suspend',
+  'M1: blocked ab morgen, Einheit morgen -> aussetzen');
+SELECT is((SELECT app._t40_row(r, 'a9100000-0000-0000-0000-000000000014') ->> 'source' FROM t40), 'mirror',
+  'M1: Quelle mirror, nicht rule/volle Gruppe');
+SELECT is((SELECT app._t40_row(r, 'a9100000-0000-0000-0000-000000000017') ->> 'suggestion' FROM t40), 'individual',
+  'M1: heute individual, morgen full -> der strengere Status (individual) gilt');
+DROP TABLE t40;
+SELECT is((app._t40_row(app.rpc_get_session_squad_check(current_date, 60::smallint, 6::smallint, NULL), 'a9100000-0000-0000-0000-000000000014') ->> 'source'),
+  'rule', 'M1: fuer eine Einheit heute gilt das Sperrdatum morgen noch nicht (kein Spiegel, Regel v1)');
+
+INSERT INTO app.training_sessions (id, team_id, session_date, duration_min, planned_intensity, created_by) VALUES
+  ('a9200000-0000-0000-0000-000000000004','a9000000-0000-0000-0000-000000000001', current_date + 1, 60, 6, 'a9100000-0000-0000-0000-000000000002');
+SELECT ok(app.is_denial(app.rpc_dismiss_session_hint('a9200000-0000-0000-0000-000000000004', 'a9100000-0000-0000-0000-000000000014', 'h1')),
+  'M1: fuer die Einheit morgen ist P4 ein Spiegel und nicht wegklickbar');
+DELETE FROM app.training_sessions WHERE id = 'a9200000-0000-0000-0000-000000000004';
+DELETE FROM app.medical_clearances
+ WHERE person_id IN ('a9100000-0000-0000-0000-000000000014','a9100000-0000-0000-0000-000000000017')
+   AND valid_from = (current_date + 1)::timestamptz;
+
+-- -----------------------------------------------------------------------------
 -- 6. Wegklicken
 -- -----------------------------------------------------------------------------
 SELECT ok(NOT app.is_denial(app.rpc_dismiss_session_hint('a9200000-0000-0000-0000-000000000001', 'a9100000-0000-0000-0000-000000000011', 'h2')),
@@ -360,6 +389,37 @@ SELECT ok(app.is_denial(app.rpc_dismiss_session_hint('a9200000-0000-0000-0000-00
 
 -- Loeschen der Einheit nimmt ihre Wegklicks mit (FK CASCADE).
 SELECT app._t40_jwt('a9100000-0000-0000-0000-000000000002', 'coach');
+-- Code-Review HOCH: Wegklicks gelten fuer den Plan, gegen den sie gemacht wurden.
+SELECT ok(NOT app.is_denial(app.rpc_dismiss_session_hint('a9200000-0000-0000-0000-000000000001', 'a9100000-0000-0000-0000-000000000011', 'h2')),
+  'coach klickt h2 fuer P1 erneut weg');
+SELECT ok(NOT app.is_denial(app.rpc_update_training_session('a9200000-0000-0000-0000-000000000001', current_date, NULL, 60::smallint, 'field'::app.app_session_type, 6::smallint, 'nur Ziel geaendert')),
+  'Aenderung nur am Ziel der Einheit');
+SELECT is((SELECT count(*)::int FROM app.session_hint_dismissals WHERE session_id = 'a9200000-0000-0000-0000-000000000001'), 1,
+  'Ziel geaendert: der Wegklick bleibt');
+SELECT ok(NOT app.is_denial(app.rpc_update_training_session('a9200000-0000-0000-0000-000000000001', current_date, NULL, 60::smallint, 'field'::app.app_session_type, 10::smallint, 'nur Ziel geaendert')),
+  'Intensitaet von 6 auf 10 geaendert');
+SELECT is((SELECT count(*)::int FROM app.session_hint_dismissals WHERE session_id = 'a9200000-0000-0000-0000-000000000001'), 0,
+  'Intensitaet geaendert: alle Wegklicks der Einheit sind geloescht');
+CREATE TEMP TABLE t40 AS
+  SELECT app.rpc_get_session_squad_check(current_date, 60::smallint, 10::smallint, 'a9200000-0000-0000-0000-000000000001') AS r;
+SELECT ok((SELECT (app._t40_row(r, 'a9100000-0000-0000-0000-000000000011') -> 'hints') ? 'h2' FROM t40),
+  'nach der Intensitaetsaenderung ist h2 fuer P1 wieder aktiv');
+SELECT is((SELECT app._t40_row(r, 'a9100000-0000-0000-0000-000000000011') ->> 'suggestion' FROM t40), 'reduced',
+  'und die Eskalation reduziert ist zurueck');
+DROP TABLE t40;
+SELECT ok(NOT app.is_denial(app.rpc_dismiss_session_hint('a9200000-0000-0000-0000-000000000001', 'a9100000-0000-0000-0000-000000000011', 'h2')),
+  'h2 fuer P1 noch einmal weg');
+SELECT ok(NOT app.is_denial(app.rpc_update_training_session('a9200000-0000-0000-0000-000000000001', current_date, NULL, 75::smallint, 'field'::app.app_session_type, 10::smallint, 'nur Ziel geaendert')),
+  'Dauer von 60 auf 75 geaendert');
+SELECT is((SELECT count(*)::int FROM app.session_hint_dismissals WHERE session_id = 'a9200000-0000-0000-0000-000000000001'), 0,
+  'Dauer geaendert: Wegklicks geloescht');
+SELECT ok(NOT app.is_denial(app.rpc_dismiss_session_hint('a9200000-0000-0000-0000-000000000001', 'a9100000-0000-0000-0000-000000000011', 'h2')),
+  'h2 fuer P1 ein drittes Mal weg');
+SELECT ok(NOT app.is_denial(app.rpc_update_training_session('a9200000-0000-0000-0000-000000000001', current_date + 1, NULL, 75::smallint, 'field'::app.app_session_type, 10::smallint, 'nur Ziel geaendert')),
+  'Einheit auf morgen verschoben');
+SELECT is((SELECT count(*)::int FROM app.session_hint_dismissals WHERE session_id = 'a9200000-0000-0000-0000-000000000001'), 0,
+  'Datum geaendert: Wegklicks geloescht');
+
 SELECT ok(NOT app.is_denial(app.rpc_dismiss_session_hint('a9200000-0000-0000-0000-000000000001', 'a9100000-0000-0000-0000-000000000014', 'h1')),
   'coach klickt h1 fuer P4 weg');
 DELETE FROM app.training_sessions WHERE id = 'a9200000-0000-0000-0000-000000000001';

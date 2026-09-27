@@ -24,7 +24,7 @@
 
 BEGIN;
 SET search_path = public, pgtap;
-SELECT plan(107);
+SELECT plan(110);
 
 -- -----------------------------------------------------------------------------
 -- Fixtures (als Superuser). Entwurf/Einheit: Intensitaet 6 x 60 min = 360.
@@ -40,6 +40,8 @@ SELECT plan(107);
 --      unveroeffentlichte Abweichung                          -> nie Kandidat
 --   QB full, Band low,  median 360 -> h1, j1 weggeklickt        -> kein Kandidat
 --   QC full, Band low,  median 360 -> h1 weggeklickt            -> kein Kandidat
+--   QD full, Check-in, aber kein Readiness-Score (kein Band), median 280 -> h2,
+--      nach Regel v1 Kandidatin, geht aber ohne Band NIE an JEV
 -- -----------------------------------------------------------------------------
 
 INSERT INTO app.teams (id, name, timezone) VALUES
@@ -62,6 +64,7 @@ INSERT INTO app.persons (id, team_id, display_name, person_position, shirt_numbe
   ('b1100000-0000-0000-0000-00000000001a','b1000000-0000-0000-0000-000000000001','QA Markantname','mitte',20,NULL,true),
   ('b1100000-0000-0000-0000-00000000001b','b1000000-0000-0000-0000-000000000001','QB Markantname','mitte',21,NULL,true),
   ('b1100000-0000-0000-0000-00000000001c','b1000000-0000-0000-0000-000000000001','QC Markantname','mitte',22,NULL,true),
+  ('b1100000-0000-0000-0000-00000000001d','b1000000-0000-0000-0000-000000000001','QD Markantname','mitte',23,NULL,true),
   ('b1100000-0000-0000-0000-000000000008','b1000000-0000-0000-0000-000000000008','Coach B1b',NULL,NULL,'b1100000-0000-0000-0000-000000000008',true);
 
 INSERT INTO app.role_assignments (team_id, person_id, role, valid_from, valid_to)
@@ -85,6 +88,11 @@ RETURNS void LANGUAGE sql AS $$
 $$;
 
 -- Personen, die ein JEV-Kontext als Kandidaten fuehrt (ueber die refs).
+CREATE OR REPLACE FUNCTION app._t41_row40(p_result jsonb, p_person text)
+RETURNS jsonb LANGUAGE sql AS $$
+  SELECT a FROM jsonb_array_elements(p_result -> 'athletes') a WHERE a ->> 'person_id' = p_person;
+$$;
+
 CREATE OR REPLACE FUNCTION app._t41_cand_people(p_ctx jsonb)
 RETURNS text[] LANGUAGE sql AS $$
   SELECT COALESCE(array_agg(e ->> 'person_id' ORDER BY e ->> 'person_id'), ARRAY[]::text[])
@@ -115,12 +123,12 @@ SELECT 'b1000000-0000-0000-0000-000000000001', p.id, current_date,
        '{"sleep_quality": 5}'::jsonb
   FROM app.persons p
  WHERE p.id::text LIKE 'b1100000-0000-0000-0000-00000000001%'
-   AND p.id <> 'b1100000-0000-0000-0000-000000000015';
+   AND p.id NOT IN ('b1100000-0000-0000-0000-000000000015','b1100000-0000-0000-0000-00000000001d');
 
 INSERT INTO app.baselines (team_id, person_id, metric, as_of, n_obs, median, sigma, direction, status)
 SELECT 'b1000000-0000-0000-0000-000000000001', p.id, 'session_load', current_date, 20,
        CASE WHEN p.id IN ('b1100000-0000-0000-0000-000000000011','b1100000-0000-0000-0000-000000000013',
-                          'b1100000-0000-0000-0000-000000000016') THEN 280 ELSE 360 END,
+                          'b1100000-0000-0000-0000-000000000016','b1100000-0000-0000-0000-00000000001d') THEN 280 ELSE 360 END,
        60, 'neutral', 'ok'
   FROM app.persons p
  WHERE p.id::text LIKE 'b1100000-0000-0000-0000-00000000001%'
@@ -161,6 +169,8 @@ SELECT ok(NOT has_table_privilege('authenticated', 'app.model_call_log', 'INSERT
 SELECT ok(NOT has_table_privilege('authenticated', 'app.model_call_subjects', 'SELECT'), 'authenticated liest model_call_subjects nicht');
 SELECT ok(NOT has_table_privilege('anon', 'app.model_call_log', 'SELECT'), 'anon liest model_call_log nicht');
 SELECT ok(NOT has_sequence_privilege('authenticated', 'app.model_call_log_id_seq', 'USAGE'), 'authenticated hat kein Recht auf die Sequenz');
+SELECT is((SELECT confdeltype::text FROM pg_constraint WHERE conname = 'model_call_log_actor_id_fkey'), 'a',
+  'actor_id: ON DELETE NO ACTION (passt zum CHECK fuer actor_kind person)');
 SELECT ok((SELECT relrowsecurity AND relforcerowsecurity FROM pg_class WHERE oid = 'app.model_call_log'::regclass),
   'model_call_log: RLS an und erzwungen');
 SELECT throws_ok(
@@ -270,8 +280,12 @@ CREATE TEMP TABLE t41a AS
 
 SELECT is((SELECT app._t41_cand_people(c) FROM t41a),
   ARRAY['b1100000-0000-0000-0000-000000000013','b1100000-0000-0000-0000-000000000014'],
-  'Modul aus: nur Q3 (h2 < 2) und Q4 (h1). Ausgeschlossen: Q1 eskaliert, Q5 nur h3, Q6/Q8 Spiegel, Q9 h4 ohne Modul, QA pain_max/unveroeffentlicht, QB j1, QC h1 weggeklickt');
+  'Modul aus: nur Q3 (h2 < 2) und Q4 (h1). Ausgeschlossen: Q1 eskaliert, Q5 nur h3, Q6/Q8 Spiegel, Q9 h4 ohne Modul, QA pain_max/unveroeffentlicht, QB j1, QC h1 weggeklickt, QD ohne Band');
 SELECT is((SELECT jsonb_array_length(c -> 'candidates') FROM t41a), 2, 'zwei Kandidaten im Kontext');
+SELECT ok((SELECT NOT ((c -> 'candidates')::text ILIKE '%unknown%') FROM t41a),
+  'kein Platzhalter-Band (unknown) im Kontext');
+SELECT is((app._t41_row40(app.rpc_get_session_squad_check(current_date, 60::smallint, 6::smallint, 'b1200000-0000-0000-0000-000000000001'), 'b1100000-0000-0000-0000-00000000001d') -> 'hints'),
+  '["h2"]'::jsonb, 'QD: Regel v1 unveraendert (h2 aktiv, volle Gruppe), nur nicht an JEV');
 SELECT is((SELECT count(*)::int FROM app.model_call_log WHERE team_id = 'b1000000-0000-0000-0000-000000000001'), 1,
   'genau eine Protokollzeile fuer den Aufruf');
 SELECT is((SELECT array_agg(person_id::text ORDER BY person_id) FROM app.model_call_subjects WHERE call_id = (SELECT (c ->> 'call_id')::bigint FROM t41a)),

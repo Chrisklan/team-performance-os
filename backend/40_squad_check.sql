@@ -193,13 +193,9 @@ BEGIN
   base AS (
     SELECT
       p.person_id,
-      -- Freigabe: dieselbe Auswahlregel wie app.rpc_get_clearance (samt id-Tiebreaker).
-      (SELECT c.status FROM app.medical_clearances c
-        WHERE c.person_id = p.person_id AND c.team_id = p_team_id
-          AND c.valid_from <= current_date
-          AND (c.valid_to IS NULL OR c.valid_to >= current_date)
-        ORDER BY c.valid_from DESC, c.id DESC
-        LIMIT 1) AS clearance,
+      -- Freigabe: strengerer Status aus heute UND dem Datum der Einheit
+      -- (Security-Review M1), siehe app._squad_check_clearance.
+      app._squad_check_clearance(p_team_id, p.person_id, p_date) AS clearance,
       -- Nur das Band, nie score_total/factors.
       (SELECT rs.band FROM app.readiness_scores rs
         WHERE rs.person_id = p.person_id AND rs.team_id = p_team_id
@@ -308,26 +304,53 @@ COMMENT ON FUNCTION app._squad_check_v1(uuid, date, smallint, smallint, uuid) IS
 REVOKE EXECUTE ON FUNCTION app._squad_check_v1(uuid, date, smallint, smallint, uuid) FROM PUBLIC, anon, authenticated;
 
 -- -----------------------------------------------------------------------------
--- 3. app._squad_check_clearance — Freigabestatus einer Person (fuer den
---    Spiegel-Ausschluss beim Wegklicken), dieselbe Auswahlregel wie oben
+-- 3. app._squad_check_clearance — Freigabestatus einer Person fuer eine Einheit
 -- -----------------------------------------------------------------------------
+-- Security-Review M1 (2026-09-27): die erste Fassung wertete die Freigabe nur
+-- fuer current_date aus. Eine Einheit kann in der Zukunft liegen. Galt ein
+-- blocked erst ab dem Tag der Einheit, erschien die Person faelschlich als
+-- "volle Gruppe" und damit als JEV-Kandidatin, obwohl die Aerztin sie fuer
+-- diesen Tag gesperrt hat. Jetzt: je Tag dieselbe Auswahlregel wie
+-- app.rpc_get_clearance (juengstes valid_from, id-Tiebreaker), einmal fuer
+-- current_date und einmal fuer p_date, und der STRENGERE Status gewinnt
+-- (blocked vor individual vor limited vor full). Keine Zeile an beiden Tagen
+-- -> NULL (wie full behandelt). Wird von _squad_check_v1 UND vom Wegklick-
+-- Ausschluss benutzt, damit es auch hier nur eine Regel gibt.
 
-CREATE OR REPLACE FUNCTION app._squad_check_clearance(p_team_id uuid, p_person_id uuid)
+DROP FUNCTION IF EXISTS app._squad_check_clearance(uuid, uuid);
+
+CREATE OR REPLACE FUNCTION app._squad_check_clearance(p_team_id uuid, p_person_id uuid, p_date date)
 RETURNS app.app_clearance
 LANGUAGE sql
 STABLE
 SECURITY DEFINER
 SET search_path = app, pg_temp
 AS $$
-  SELECT c.status FROM app.medical_clearances c
-   WHERE c.person_id = p_person_id AND c.team_id = p_team_id
-     AND c.valid_from <= current_date
-     AND (c.valid_to IS NULL OR c.valid_to >= current_date)
-   ORDER BY c.valid_from DESC, c.id DESC
+  SELECT s.status
+    FROM (
+      SELECT (SELECT c.status FROM app.medical_clearances c
+               WHERE c.person_id = p_person_id AND c.team_id = p_team_id
+                 AND c.valid_from <= d.day
+                 AND (c.valid_to IS NULL OR c.valid_to >= d.day)
+               ORDER BY c.valid_from DESC, c.id DESC
+               LIMIT 1) AS status
+        FROM (VALUES (current_date), (COALESCE(p_date, current_date))) AS d(day)
+    ) s
+   WHERE s.status IS NOT NULL
+   ORDER BY CASE s.status
+              WHEN 'blocked'    THEN 1
+              WHEN 'individual' THEN 2
+              WHEN 'limited'    THEN 3
+              ELSE 4
+            END
    LIMIT 1;
 $$;
 
-REVOKE EXECUTE ON FUNCTION app._squad_check_clearance(uuid, uuid) FROM PUBLIC, anon, authenticated;
+COMMENT ON FUNCTION app._squad_check_clearance(uuid, uuid, date) IS
+  'AP-69: Freigabestatus fuer eine Einheit, strengerer Status aus current_date und p_date '
+  '(Security-Review M1). Siehe backend/40_squad_check.sql.';
+
+REVOKE EXECUTE ON FUNCTION app._squad_check_clearance(uuid, uuid, date) FROM PUBLIC, anon, authenticated;
 
 -- -----------------------------------------------------------------------------
 -- 4. app.rpc_get_session_squad_check — Muster D, nur Staff, eigenes Team
@@ -440,7 +463,8 @@ SECURITY DEFINER
 SET search_path = app, pg_temp
 AS $$
 DECLARE
-  v_team_id uuid;
+  v_team_id      uuid;
+  v_session_date date;
 BEGIN
   IF app.auth_team_id() IS NULL THEN
     RETURN app.deny('session_hint.dismiss', 'FORBIDDEN: session_hint.dismiss');
@@ -456,9 +480,9 @@ BEGIN
     RAISE EXCEPTION 'INVALID: session_hint.hint_key' USING errcode = '22023';
   END IF;
 
-  IF NOT EXISTS (
-    SELECT 1 FROM app.training_sessions WHERE id = p_session_id AND team_id = v_team_id
-  ) THEN
+  SELECT session_date INTO v_session_date
+    FROM app.training_sessions WHERE id = p_session_id AND team_id = v_team_id;
+  IF NOT FOUND THEN
     RAISE EXCEPTION 'NOT_FOUND: training_sessions' USING errcode = 'P0002';
   END IF;
 
@@ -466,7 +490,7 @@ BEGIN
     RETURN app.deny('session_hint.dismiss', 'FORBIDDEN: session_hint.dismiss');
   END IF;
 
-  IF app._squad_check_clearance(v_team_id, p_person_id) IN ('blocked','individual','limited') THEN
+  IF app._squad_check_clearance(v_team_id, p_person_id, v_session_date) IN ('blocked','individual','limited') THEN
     RETURN app.deny('session_hint.dismiss', 'FORBIDDEN: session_hint.mirror');
   END IF;
 
@@ -542,6 +566,119 @@ COMMENT ON FUNCTION app.rpc_restore_session_hint(uuid, uuid, text) IS
 
 REVOKE EXECUTE ON FUNCTION app.rpc_restore_session_hint(uuid, uuid, text) FROM PUBLIC, anon;
 GRANT  EXECUTE ON FUNCTION app.rpc_restore_session_hint(uuid, uuid, text) TO authenticated;
+
+-- -----------------------------------------------------------------------------
+-- 5b. app.rpc_update_training_session — Wegklicks an den Plan binden
+-- -----------------------------------------------------------------------------
+-- Code-Review HOCH (2026-09-27): ein Wegklick war nur ueber (session_id,
+-- person_id, hint_key, rule_version) eindeutig, ohne Bezug zum Plan, gegen den
+-- weggeklickt wurde. Szenario: h2 bei Intensitaet 4 weggeklickt (z knapp 1),
+-- danach dieselbe Einheit mit Intensitaet 10 gespeichert (z >= 2) -- h2 blieb
+-- weggeklickt, die Eskalation "reduziert" fehlte still. Fix (konservativ):
+-- aendert rpc_update_training_session Datum, Dauer oder Intensitaet, werden
+-- alle Wegklicks dieser Einheit geloescht. Ein Datumswechsel deckt zugleich
+-- den Fall "Band h1 ueber Tage" fuer verschobene Einheiten ab.
+-- Rumpf 1:1 aus backend/38_training_load.sql (Abschnitt 7), CREATE OR REPLACE,
+-- Signatur und Rueckgabetyp gleich, ACL bleibt. Neu sind nur v_old und der
+-- DELETE-Block. Die Tuer public.rpc_update_training_session bleibt unveraendert.
+
+CREATE OR REPLACE FUNCTION app.rpc_update_training_session(
+  p_session_id         uuid,
+  p_session_date       date,
+  p_start_time         time,
+  p_duration_min       smallint,
+  p_session_type       app.app_session_type,
+  p_planned_intensity  smallint DEFAULT NULL,
+  p_goal_text          text DEFAULT NULL
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path = app, pg_temp
+AS $$
+DECLARE
+  v_team_id  uuid;
+  v_old_date date;
+  v_old      app.training_sessions%rowtype;
+  v_row      app.training_sessions%rowtype;
+  r          record;
+BEGIN
+  IF app.auth_team_id() IS NULL THEN
+    RETURN app.deny('training_sessions.update', 'FORBIDDEN: training_sessions.update');
+  END IF;
+
+  IF NOT app.auth_is_staff() THEN
+    RETURN app.deny('training_sessions.update', 'FORBIDDEN: training_sessions.update');
+  END IF;
+
+  v_team_id := app.auth_team_id();
+
+  IF NOT EXISTS (
+    SELECT 1 FROM app.training_sessions WHERE id = p_session_id AND team_id = v_team_id
+  ) THEN
+    RETURN app.deny('training_sessions.update', 'FORBIDDEN: training_sessions.update');
+  END IF;
+
+  IF p_session_date IS NULL THEN
+    RAISE EXCEPTION 'INVALID: training_sessions.session_date' USING errcode = '22023';
+  END IF;
+
+  IF p_duration_min IS NULL OR p_duration_min <= 0 OR p_duration_min > 300 THEN
+    RAISE EXCEPTION 'INVALID: training_sessions.duration_min' USING errcode = '22023';
+  END IF;
+
+  IF p_planned_intensity IS NOT NULL AND p_planned_intensity NOT BETWEEN 1 AND 10 THEN
+    RAISE EXCEPTION 'INVALID: training_sessions.planned_intensity' USING errcode = '22023';
+  END IF;
+
+  SELECT * INTO v_old
+    FROM app.training_sessions WHERE id = p_session_id AND team_id = v_team_id;
+  v_old_date := v_old.session_date;
+
+  UPDATE app.training_sessions SET
+    session_date      = p_session_date,
+    start_time        = p_start_time,
+    duration_min      = p_duration_min,
+    session_type      = p_session_type,
+    planned_intensity = p_planned_intensity,
+    goal_text         = p_goal_text,
+    updated_at        = now()
+  WHERE id = p_session_id AND team_id = v_team_id
+  RETURNING * INTO v_row;
+
+  -- AP-69 (Code-Review HOCH): ein Wegklick gilt fuer den Plan, gegen den er
+  -- gemacht wurde. Aendert sich Datum, Dauer oder Intensitaet, gehen alle
+  -- Wegklicks dieser Einheit, der Trainer sieht die Hinweise wieder.
+  IF v_old.session_date      IS DISTINCT FROM v_row.session_date
+     OR v_old.duration_min      IS DISTINCT FROM v_row.duration_min
+     OR v_old.planned_intensity IS DISTINCT FROM v_row.planned_intensity THEN
+    DELETE FROM app.session_hint_dismissals
+     WHERE session_id = p_session_id AND team_id = v_team_id;
+  END IF;
+
+  IF v_old_date IS DISTINCT FROM v_row.session_date THEN
+    FOR r IN
+      SELECT DISTINCT sr.person_id FROM app.session_rpe sr WHERE sr.session_id = p_session_id
+    LOOP
+      PERFORM app._compute_daily_session_load(r.person_id, v_old_date);
+      PERFORM app._compute_daily_session_load(r.person_id, v_row.session_date);
+    END LOOP;
+  END IF;
+
+  RETURN to_jsonb(v_row);
+END;
+$$;
+
+COMMENT ON FUNCTION app.rpc_update_training_session(uuid, date, time, smallint, app.app_session_type, smallint, text) IS
+  'Trainingsplanung (Modul 6, AP-68). Muster D, staff-only, nur eigenes Team. '
+  'Bei geaendertem session_date wird daily_checkins.session_load fuer alten und neuen Tag '
+  'jeder Person mit RPE auf dieser Einheit neu berechnet. Siehe backend/38_training_load.sql. '
+  'AP-69: bei geaendertem Datum, Dauer oder Intensitaet werden alle Wegklicks der Einheit '
+  '(app.session_hint_dismissals) geloescht. Siehe backend/40_squad_check.sql.';
+
+REVOKE EXECUTE ON FUNCTION app.rpc_update_training_session(uuid, date, time, smallint, app.app_session_type, smallint, text) FROM PUBLIC, anon;
+GRANT  EXECUTE ON FUNCTION app.rpc_update_training_session(uuid, date, time, smallint, app.app_session_type, smallint, text) TO authenticated;
 
 -- -----------------------------------------------------------------------------
 -- 6. Die Tueren in public

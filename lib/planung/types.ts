@@ -62,7 +62,8 @@ export type TrainingSession = {
 // uebersetzt serverseitig zurueck und verlaesst den Server nie Richtung Modell.
 export type JevCandidate = {
   ref: string;
-  band: ReadinessBand | "unknown";
+  // Nie ein Platzhalter: ohne Band geht eine Person gar nicht an JEV.
+  band: ReadinessBand;
   planned_load_vs_own_norm: LoadLevel;
   released_deviations_7d: string[];
 };

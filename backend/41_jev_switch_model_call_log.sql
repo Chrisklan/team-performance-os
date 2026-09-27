@@ -31,7 +31,8 @@
 --
 -- Eingaben an JEV je Kandidat (ADR-019 §3.4 I1, nur coach-sichtbar):
 --   ref (zufaelliges Pseudonym je Aufruf, nie person_id/Name/Trikotnummer/
---   Position), band, planned_load_vs_own_norm als Stufe (nie die rohe
+--   Position), band (Gesundheitsdatum; Personen ohne Band heute gehen gar
+--   nicht an JEV, damit kein Platzhalter den Check-in-Status verraet), planned_load_vs_own_norm als Stufe (nie die rohe
 --   z-Zahl), released_deviations_7d als statement_key-Liste. NIE score_total,
 --   factors, Check-in-Status, Schmerzwert, Body Map, Freigabestatus. Session-
 --   Kontext ohne Personenbezug: Dauer, geplante Intensitaet, Typ.
@@ -161,7 +162,7 @@ CREATE TABLE IF NOT EXISTS app.model_call_log (
   finished_at   timestamptz,
   purpose       text NOT NULL CHECK (purpose IN ('ap69_squad_check')),
   actor_kind    text NOT NULL CHECK (actor_kind IN ('person','job')),
-  actor_id      uuid REFERENCES app.persons(id) ON DELETE SET NULL,
+  actor_id      uuid REFERENCES app.persons(id) ON DELETE NO ACTION,
   actor_role    app.app_role,
   job_key       text,
   CHECK ((actor_kind = 'person' AND actor_id IS NOT NULL AND actor_role IS NOT NULL AND job_key IS NULL)
@@ -176,6 +177,15 @@ CREATE TABLE IF NOT EXISTS app.model_call_log (
                 ('pending','ok','partial','invalid','timeout','rate_limited','http_error')),
   latency_ms    integer
 );
+
+-- Code-Review (2026-09-27): ON DELETE SET NULL widersprach dem CHECK fuer
+-- actor_kind = person (actor_id NOT NULL). Personenzeilen werden nie hart
+-- geloescht (Crypto Shredding), der Ausloeser wird in app.rpc_shred_person
+-- bewusst auf job/shredded umgestellt. Deshalb NO ACTION. Idempotent auch fuer
+-- eine Datenbank, auf der die erste Fassung schon lief.
+ALTER TABLE app.model_call_log DROP CONSTRAINT IF EXISTS model_call_log_actor_id_fkey;
+ALTER TABLE app.model_call_log ADD CONSTRAINT model_call_log_actor_id_fkey
+  FOREIGN KEY (actor_id) REFERENCES app.persons(id) ON DELETE NO ACTION;
 
 CREATE INDEX IF NOT EXISTS model_call_log_team_occurred_idx
   ON app.model_call_log (team_id, occurred_at DESC);
@@ -288,6 +298,10 @@ BEGIN
       FROM jsonb_array_elements(v_rows) r
      WHERE r ->> 'suggestion' = 'full'
        AND r ->> 'source' = 'rule'
+       -- Code-Review: ohne Band (kein Readiness-Score heute) nicht an JEV. Ein
+       -- Platzhalter wie 'unknown' verriete indirekt den Check-in-Status. Fuer
+       -- diese Personen gilt die Regel v1 unveraendert.
+       AND r ->> 'band' IS NOT NULL
        AND (r -> 'hints') ?| ARRAY['h1','h2','h4']
        AND NOT ((r -> 'dismissed_hints') ? 'j1')
   ),
@@ -301,7 +315,7 @@ BEGIN
     SELECT person_id,
            'A' || lpad(rn::text, greatest(2, length(total::text)), '0') AS ref,
            jsonb_build_object(
-             'band',                     COALESCE(band, 'unknown'),
+             'band',                     band,
              'planned_load_vs_own_norm', load_level,
              'released_deviations_7d',   dev_keys
            ) AS inputs

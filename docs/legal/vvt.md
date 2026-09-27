@@ -52,6 +52,7 @@
 |-----------|---------|-------|
 | Medical Clearance Status | `app.medical_clearances.status` | Freigabe-Management |
 | Belastungshinweis | `app.medical_clearances.load_note` | Trainer-Information |
+| Readiness-Band (niedrig/mittel/hoch) | `app.readiness_scores.band` | Einordnung des heutigen Zustands für das Trainerteam und die Prüfung Plan gegen Zustand (AP-69). Aus Befindlichkeitsangaben abgeleitet und damit Gesundheitsdatum, auch als grobe Stufe ohne Zahl. Geht bei eingeschalteter KI Zuordnung pseudonymisiert an OpenRouter/TypeSafe (§4) |
 | Diagnose | `public.medical_records.diagnosis` | Medizinische Dokumentation |
 | Symptome | `public.medical_records.symptoms` | Medizinische Dokumentation |
 | Behandlung | `public.medical_records.treatment` | Medizinische Dokumentation |
@@ -86,10 +87,10 @@
 | Vercel Inc. | Web-Logs, Session-Daten | Art. 28 (Auftragsverarbeiter) |
 | Expo Inc. | Push-Tokens | Art. 28 (Auftragsverarbeiter) |
 | Modellaufrufe: Anbieter des Klassifikationsmodells JEV (TypeSafe, ADR-019 Entscheidung E3 vom 2026-09-27: Einbau mit Ein/Aus-Schalter, Echtdaten ausdrücklich VOR Abschluss eines AVV erlaubt — bewusste Ausnahme, Risiko bei Chris/Unternehmen, siehe ADR-019 §3.6 Warnkasten) | Pseudonymisierte Auszüge aus Check-in, Body Map, ggf. Freitext (Art. 9), einzeln je Aufruf | Art. 28 (Auftragsverarbeiter), **AVV bleibt Ziel, ist aber keine Vorbedingung mehr für den Start (E3-Ausnahme)**. Bei Betrieb in eigener Infrastruktur entfällt der Empfänger |
-| Modellaufrufe AP-69 Plan gegen Zustand: OpenRouter Inc. (Router) weiter an TypeSafe (JEV, `typesafe/jev-1.13`). Zweite bewusste Ausnahme von ADR-019 §3.6 vom 2026-09-27: Router ohne AVV mit TPOS, von Chris im Chat bestätigt, gleiche Risikolage wie E3 (bei Chris/Unternehmen), direkter TypeSafe-Weg mit AVV bleibt Ziel. Läuft nur mit Betreiber-Notaus an (`JEV_ENABLED`) UND Team-Schalter `jev_squad_check_enabled` (setzt nur `admin`), Standard aus | Je Aufruf nur Spielerinnen aus der vollen Gruppe mit offenem Hinweis, pseudonymisiert (zufälliges Kürzel je Aufruf): Readiness-Band, geplante Last gegen eigene Norm als Stufe, Schlüssel freigegebener Lastabweichungen der letzten 7 Tage (nie `pain_max`), dazu Dauer, Intensität und Art der Einheit. Nie Name, Rückennummer, Position, Freigabestatus, Score-Zahl, Faktoren, Check-in-Status, Body Map oder Schmerzwert. Kein Inhalt wird gespeichert, nur `app.model_call_log`/`app.model_call_subjects` ohne Inhalt (§3.5) | Art. 28 angestrebt, **AVV liegt weder mit OpenRouter noch mit TypeSafe vor (Ausnahme, siehe links)**. Betrifft Art.-9-nahe Daten (Band). Verarbeitungsort bei OpenRouter nicht vertraglich auf EU/EWR festgelegt, siehe §5 |
+| Modellaufrufe AP-69 Plan gegen Zustand: OpenRouter Inc. (Router) weiter an TypeSafe (JEV, `typesafe/jev-1.13`). Zweite bewusste Ausnahme von ADR-019 §3.6 vom 2026-09-27: Router ohne AVV mit TPOS, von Chris im Chat bestätigt, gleiche Risikolage wie E3 (bei Chris/Unternehmen), direkter TypeSafe-Weg mit AVV bleibt Ziel. Läuft nur mit Betreiber-Notaus an (`JEV_ENABLED`) UND Team-Schalter `jev_squad_check_enabled` (setzt nur `admin`), Standard aus | Je Aufruf nur Spielerinnen aus der vollen Gruppe mit offenem Hinweis und mit Readiness-Band heute (ohne Band geht die Person gar nicht hinaus), pseudonymisiert (zufälliges Kürzel je Aufruf): Readiness-Band, geplante Last gegen eigene Norm als Stufe, Schlüssel freigegebener Lastabweichungen der letzten 7 Tage (nie `pain_max`), dazu Dauer, Intensität und Art der Einheit. Nie Name, Rückennummer, Position, Freigabestatus, Score-Zahl, Faktoren, Check-in-Status, Body Map oder Schmerzwert. Kein Inhalt wird gespeichert, nur `app.model_call_log`/`app.model_call_subjects` ohne Inhalt (§3.5) | Art. 28 angestrebt, **AVV liegt weder mit OpenRouter noch mit TypeSafe vor (Ausnahme, siehe links)**. Betrifft Art.-9-nahe Daten (Band). Verarbeitungsort bei OpenRouter nicht vertraglich auf EU/EWR festgelegt, siehe §5 |
 | Modellaufrufe: Anbieter des Reasoning-Modells für Trainerfragen (Anbieter nach ADR-019 Entscheidung E3) | Pseudonymisierte Antworten der Trainer-Türen (Band, Freigabe-Badge, Anwesenheit, freigegebene Abweichungen). Nie Body Map, Freitext, Schmerzwert oder Score-Zahl | Art. 28, Bedingungen wie oben |
 
-> **Ausgeschlossen als Empfänger personenbezogener Daten (ADR-019 §3.6):** kostenlose Modellendpunkte, Modell-Router oder Anbieter ohne AVV, auch bei pseudonymisierten Daten — davon unberührt ist die E3-Ausnahme für TypeSafe/JEV selbst (siehe oben).
+> **Ausgeschlossen als Empfänger personenbezogener Daten (ADR-019 §3.6):** kostenlose Modellendpunkte, Modell-Router oder Anbieter ohne AVV, auch bei pseudonymisierten Daten. Es gibt genau zwei dokumentierte, bewusste Ausnahmen, beide von Chris am 2026-09-27 bestätigt, Risiko bei Chris/Unternehmen: (1) die E3-Ausnahme für TypeSafe/JEV selbst (Echtdaten vor AVV), (2) für AP-69 der Weg **über den Router OpenRouter** (ohne AVV, Sitz USA, siehe §5). Für jeden weiteren Anbieter, Router oder Zweck gilt der Ausschluss ohne Einschränkung.
 
 ---
 
@@ -101,7 +102,7 @@
 | Vercel | USA | SCC |
 | Expo | USA | SCC |
 | OpenRouter (AP-69, Router zu TypeSafe/JEV) | USA, Verarbeitungsort nicht vertraglich festgelegt | **Kein Mechanismus vereinbart** (kein AVV, keine SCC). Teil der bewussten Ausnahme von ADR-019 §3.6 vom 2026-09-27, Risiko bei Chris/Unternehmen. Vor Livegang beim Kunden zu schließen (AVV/SCC oder Wechsel auf den direkten TypeSafe-Weg in EU/EWR) |
-| Modellanbieter (ADR-019, Entscheidung E3 vom 2026-09-27 entschieden, E4 EU-AI-Act/BetrVG weiterhin offen) | **EU/EWR vorausgesetzt** | Keine Drittlandübermittlung vorgesehen. Ein Anbieter mit Verarbeitung außerhalb EU/EWR ist für Personenbezug ausgeschlossen |
+| Übrige Modellanbieter (ADR-019, Entscheidung E3 vom 2026-09-27 entschieden, E4 EU-AI-Act/BetrVG weiterhin offen) | **EU/EWR vorausgesetzt** | Keine Drittlandübermittlung vorgesehen. Ein Anbieter mit Verarbeitung außerhalb EU/EWR ist für Personenbezug ausgeschlossen. **Einzige Ausnahme:** der AP-69-Weg über OpenRouter (Zeile oben), bewusst und dokumentiert, nicht übertragbar |
 
 ---
 
@@ -117,7 +118,8 @@
 | Auth-Daten | Vertragsende + 30 Tage | Wartefrist |
 | Hinweise, verworfen oder unbearbeitet | 90 Tage (ab Erzeugung) | Zweck mit Sichtung erledigt (ADR-019, Entwurf) |
 | Hinweise, übernommen als Vorschlag | wie Medizin-Records (Vertragsende + 3 Jahre) | Herkunftsnachweis des Freigabevorschlags (ADR-019, Entwurf) |
-| Aufrufprotokoll Modellaufrufe | 1 Jahr (ab Eintrag) | Rechenschaftspflicht, analog Access Logs (ADR-019, Entwurf) |
+| Aufrufprotokoll Modellaufrufe (`app.model_call_log`, `app.model_call_subjects`) | 1 Jahr (ab Eintrag), ohne Inhalt. Bei Löschung einer Person (Art. 17, `app.rpc_shred_person`) sofort: ihre `model_call_subjects`-Zeilen werden gelöscht, als Auslöserin wird sie in `model_call_log` anonymisiert (Zeile bleibt als Nachweis). Automatisches Löschen nach 1 Jahr ist noch nicht gebaut | Rechenschaftspflicht, analog Access Logs (ADR-019, AP-69) |
+| Weggeklickte Hinweise (`app.session_hint_dismissals`) | mit der Trainingseinheit (Löschen der Einheit löscht sie), bei Änderung von Datum, Dauer oder Intensität der Einheit sofort; bei Löschung einer Person sofort | Teamstand der Prüfung einer Einheit (AP-69) |
 | Kennzeichen Vorbefüllung | wie Check-In-Daten | Teil des Check-ins (ADR-019, Entwurf) |
 | Prompts, Rohantworten, Antworten Trainerfragen | keine Speicherung | flüchtig; beim Anbieter vertraglich 0 Tage (ADR-019, Entwurf) |
 

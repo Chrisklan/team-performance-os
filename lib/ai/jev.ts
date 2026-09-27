@@ -12,11 +12,11 @@
 // nicht bei Fehlern. Bei Fehlern wird hoechstens der HTTP-Statuscode
 // weitergegeben. Keine Wiederholung: ein Fehler faellt auf die Regel v1 zurueck.
 
+// "server-only" bricht den Build hart ab, falls die Datei je in einen
+// Client-Pfad gelangt (Code-Review 2026-09-27). Der Grep-Test in
+// lib/ai/guardrails.test.ts bleibt als zweite Ebene.
+import "server-only";
 import type { JevRequest } from "@/lib/planung/jevSquadCheck";
-
-if (typeof window !== "undefined") {
-  throw new Error("lib/ai/jev.ts ist nur serverseitig nutzbar.");
-}
 
 export const OPENROUTER_DECISIONS_ENDPOINT = "https://openrouter.ai/api/alpha/decisions";
 
