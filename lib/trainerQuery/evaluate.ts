@@ -11,6 +11,7 @@ import {
   CHECKIN_CHOICES,
   CLEARANCE_CHOICES,
   INTENT_CHOICES,
+  POSITION_MODEL_CHOICES,
   UNSUPPORTED_REASON_CHOICES,
   type BandChoice,
   type CheckinChoice,
@@ -18,6 +19,12 @@ import {
   type IntentChoice,
   type UnsupportedReasonChoice,
 } from "./schema";
+
+// I-2 (Security-Review): das Modell bekommt/liefert nur "any" plus die vier
+// festen Kategorien aus schema.ts::POSITION_MODEL_CHOICES, nie den rohen
+// person_position-Freitext.
+export type PositionChoice = "any" | (typeof POSITION_MODEL_CHOICES)[number];
+const POSITION_CHOICES = ["any", ...POSITION_MODEL_CHOICES] as const;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -40,7 +47,7 @@ export type ParsedTrainerQueryAnswers = {
   band: BandChoice;
   clearance: ClearanceChoice;
   checkin: CheckinChoice;
-  position: string;
+  position: PositionChoice;
   playerRef: string;
   unsupportedReason: UnsupportedReasonChoice;
 };
@@ -53,10 +60,15 @@ export type TrainerQueryResultClass = "ok" | "partial" | "invalid";
 // ungueltigen Wert auf einen sicheren neutralen Wert zurueck (any/keine/none)
 // -- das schraenkt die Auswertung nie unbeabsichtigt aus, es macht sie nur
 // weniger spezifisch (resultClass "partial" statt "invalid").
+//
+// I-2 (Security-Review): mentionedRefs ist NUR die Teilmenge der Refs, die dem
+// Modell ueberhaupt als player_ref-Choice angeboten wurde (spec.ts baut die
+// Frage nur aus ctx.mentionedRefs, nicht aus allen Kader-Refs) -- die
+// Validierung hier prueft exakt gegen dieselbe Menge, damit das Modell nie
+// einen Ref auswaehlen kann, den es nie zur Auswahl hatte.
 export function parseTrainerQueryAnswers(
   response: unknown,
-  refs: readonly string[],
-  positions: readonly string[],
+  mentionedRefs: readonly string[],
   minConfidence: number,
 ): { resultClass: TrainerQueryResultClass; parsed: ParsedTrainerQueryAnswers } {
   const fallback: ParsedTrainerQueryAnswers = {
@@ -92,12 +104,11 @@ export function parseTrainerQueryAnswers(
   const checkin =
     checkinAnswer && checkinAnswer.confidence >= minConfidence ? checkinAnswer.choice : ((degraded = true), "any" as const);
 
-  const positionChoices = ["any", ...positions] as const;
-  const positionAnswer = validChoice(answers.position, positionChoices);
+  const positionAnswer = validChoice(answers.position, POSITION_CHOICES);
   const position =
-    positionAnswer && positionAnswer.confidence >= minConfidence ? positionAnswer.choice : ((degraded = true), "any");
+    positionAnswer && positionAnswer.confidence >= minConfidence ? positionAnswer.choice : ((degraded = true), "any" as const);
 
-  const refChoices = ["keine", ...refs] as const;
+  const refChoices = ["keine", ...mentionedRefs] as const;
   const playerRefAnswer = validChoice(answers.player_ref, refChoices);
   const playerRef =
     playerRefAnswer && playerRefAnswer.confidence >= minConfidence ? playerRefAnswer.choice : ((degraded = true), "keine");
@@ -124,10 +135,15 @@ export function parseTrainerQueryAnswers(
 
 // Kontext, den spec.ts fuer buildRequest/parse/guard schliesst (Ctx im Sinne
 // von lib/ai/gateway/run.ts::ModelCallSpec). Rein, kein Next/Supabase-Bezug.
+//
+// I-2 (Security-Review): mentionedRefs (nicht refs!) ist die Grundlage fuer
+// die player_ref-Choices, die dem Modell angeboten werden -- refs bleibt die
+// VOLLSTAENDIGE Kaderliste nur fuer die deterministische Auswertung
+// (evaluate.ts) auf dem Server, sie geht selbst nie an das Modell.
 export type TrainerQueryContext = {
   pseudonymizedQuestion: string;
   refs: ResolvedPlayerRef[];
-  positions: string[];
+  mentionedRefs: ResolvedPlayerRef[];
 };
 
 export type TrainerQueryOutputPlayer = {
@@ -186,7 +202,7 @@ export function evaluateTrainerQuery(
     pool = pool.filter((r) => r.hasCheckIn === wantsCheckin);
   }
   if (parsed.position !== "any") {
-    pool = pool.filter((r) => r.position === parsed.position);
+    pool = pool.filter((r) => r.positionCategory === parsed.position);
   }
 
   const players = pool.map(toOutputPlayer);

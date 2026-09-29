@@ -12,8 +12,8 @@ export const TRAINER_QUERY_LABEL = "KI-Antwort";
 const UNSUPPORTED_REASON_TEXT: Record<UnsupportedReasonChoice, string> = {
   history: "Zeitraeume und Verlaeufe beantwortet diese Funktion nicht.",
   why_explain: "Begruendungen beantwortet diese Funktion nicht.",
-  prediction: "Vorhersagen beantwortet diese Funktion nicht.",
-  medical_detail: "Medizinische Einzelheiten beantwortet diese Funktion nicht.",
+  future_state: "Vorhersagen beantwortet diese Funktion nicht.",
+  detail_out_of_scope: "Medizinische Einzelheiten beantwortet diese Funktion nicht.",
   other: "Diese Frage passt nicht in das feste Frageschema.",
   none: "Diese Frage passt nicht in das feste Frageschema.",
 };

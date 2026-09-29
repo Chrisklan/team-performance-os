@@ -21,11 +21,12 @@
 //   6. Feste deutsche Vorlagen, Label "KI-Antwort" (render.ts).
 // Keine Speicherung, kein Gespraechsverlauf, kein Cache von Tuer-Snapshots.
 
-import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { classifyRpcError } from "@/lib/trainer/errors";
 import { readJevConfig } from "@/lib/ai/jev";
 import { g01Violations } from "@/lib/ai/guardrails";
 import { runModelCall } from "@/lib/ai/gateway/run";
+import { gatewayDb } from "@/lib/ai/gateway/db";
+import { AP70_TRAINER_QUERY } from "@/lib/ai/gateway/purposes";
 import { buildTrainerQuerySpec } from "./spec";
 import { resolvePlayerRefs } from "./resolve";
 import { renderTrainerQueryAnswer, type TrainerQueryAnswerView } from "./render";
@@ -88,8 +89,11 @@ export async function askTrainerQuery(question: string): Promise<TrainerQueryRes
     return { ok: true, answer: UNSUPPORTED_INPUT_ANSWER };
   }
 
-  const supabase = createSupabaseServerClient();
-  const { data, error, status } = await supabase.rpc("rpc_trainer_morning_ops");
+  // I-3 (Security-Review): ueber die Gateway-Kapselung lesen (dieselbe Tuer wie
+  // das Trainer-Dashboard, AP-30), nicht per freiem supabase.rpc(). Damit ist
+  // rpc_trainer_morning_ops als dataDoor von ap70_trainer_query registriert
+  // (purposes.ts) und faellt unter den Registry-Scan in lib/ai/guardrails.test.ts.
+  const { data, error, status } = await gatewayDb(AP70_TRAINER_QUERY).readDoor("rpc_trainer_morning_ops", {});
   if (error) {
     return { ok: false, message: classifyRpcError(error, status).message };
   }
@@ -98,14 +102,21 @@ export async function askTrainerQuery(question: string): Promise<TrainerQueryRes
   }
   const payload = data as CoachKaderPayload;
 
-  const { pseudonymizedQuestion, refs, mentionedRefs } = resolvePlayerRefs(trimmed, payload);
+  const resolved = resolvePlayerRefs(trimmed, payload);
+  if (!resolved.ok) {
+    // C1 (Security-Review): fail-closed -- ein unerkanntes Wort bleibt nach der
+    // Pseudonymisierung uebrig, KEIN Modellaufruf, KEIN stiller Fallback auf
+    // "player_ref: keine" (der versehentlich alle Spieler aufgelistet haette).
+    return { ok: true, answer: UNSUPPORTED_INPUT_ANSWER };
+  }
+  const { pseudonymizedQuestion, refs, mentionedRefs } = resolved;
 
   const config = readJevConfig();
   const subjectIds = mentionedRefs.map((r) => r.personId);
-  const inputHash = hashInput(pseudonymizedQuestion, refs.map((r) => r.ref));
+  const inputHash = hashInput(pseudonymizedQuestion, mentionedRefs.map((r) => r.ref));
 
   const spec = buildTrainerQuerySpec({
-    ctx: { pseudonymizedQuestion, refs, positions: [] },
+    ctx: { pseudonymizedQuestion, refs, mentionedRefs },
     openArgs: { p_input_hash: inputHash, p_subject_ids: subjectIds },
     apiKey: config.provider === "openrouter" ? config.apiKey : null,
     model: config.model ?? AP70_PINNED_MODEL,

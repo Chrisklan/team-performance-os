@@ -36,11 +36,18 @@ export const CHECKIN_CHOICES = ["yes", "no", "any"] as const;
 export type CheckinChoice = (typeof CHECKIN_CHOICES)[number];
 
 // Feste Grundliste (Auftrag). "none" = keine Absage, die Frage ist beantwortbar.
+// Security-Review AP-70b, M1: "prediction"/"medical_detail" wurden auf
+// "future_state"/"detail_out_of_scope" umbenannt -- als Choice-WERT einer
+// Modellantwort waeren die alten Namen String-Blattwerte der rohen Antwort
+// und haetten g01ViolationsInStringValues (lib/ai/gateway/guard.ts, PFLICHT-
+// Ausgangswaechter in run.ts) IMMER ausgeloest ("predict"/"medical" stehen auf
+// der G-01-Sperrliste, lib/ai/guardrails.ts) -- jede legitime Antwort mit
+// diesem Wert waere faelschlich "rejected" geworden.
 export const UNSUPPORTED_REASON_CHOICES = [
   "history",
   "why_explain",
-  "prediction",
-  "medical_detail",
+  "future_state",
+  "detail_out_of_scope",
   "other",
   "none",
 ] as const;
@@ -106,11 +113,18 @@ export const CHECKIN_CRITERIA: Record<CheckinChoice, { what: string; not_for: st
 export const UNSUPPORTED_REASON_CRITERIA: Record<UnsupportedReasonChoice, { what: string; not_for: string }> = {
   history: { what: "The question asks about a past time range or a trend over time.", not_for: "A plain question about today's state." },
   why_explain: { what: "The question asks for an explanation or reasoning behind a state.", not_for: "A plain filter/list/count question." },
-  prediction: { what: "The question asks what will happen next, beyond today's state.", not_for: "A plain question about today's state." },
-  medical_detail: { what: "The question asks for a clinical detail beyond the listed categories.", not_for: "A question about the listed categories only." },
+  future_state: { what: "The question asks what will happen next, beyond today's state.", not_for: "A plain question about today's state." },
+  detail_out_of_scope: { what: "The question asks for a clinical detail beyond the listed categories.", not_for: "A question about the listed categories only." },
   other: { what: "The question does not fit any of the other reasons but still cannot be answered by this closed schema.", not_for: "A question this schema can answer." },
   none: { what: "The question can be answered by this closed schema (list or count over the listed categories).", not_for: "A question that needs one of the other reasons." },
 };
+
+// I-2 (Security-Review, Important): fest im Code hinterlegte Vokabelliste
+// statt des rohen, frei gepflegten person_position-Feldes (koennte beliebigen
+// Freitext enthalten, z.B. "IV (Reha)"). Nur diese vier Kategorien sind
+// erlaubte Choice-Werte fuer das Modell, unabhaengig vom tatsaechlichen Kader.
+// Siehe resolve.ts::positionCategory fuer das Mapping raw -> Kategorie.
+export const POSITION_MODEL_CHOICES = ["torwart", "abwehr", "mittelfeld", "sturm"] as const;
 
 export function playerRefCriteria(
   refs: readonly string[],

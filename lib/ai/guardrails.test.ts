@@ -22,9 +22,14 @@ function filesUnder(dir: string): string[] {
 }
 
 describe("T3: kein service_role im Modellpfad", () => {
-  const files = [...filesUnder(join(ROOT, "lib/ai")), ...filesUnder(join(ROOT, "lib/planung"))].filter(
-    (f) => !f.endsWith(".test.ts"),
-  );
+  // Security-Review AP-70b, I-3: lib/trainerQuery ergaenzt -- der Scan deckte
+  // vorher nur lib/ai/lib/planung ab, ein Umbau von lib/trainerQuery (z.B. ein
+  // Admin-Client) waere von keinem Test bemerkt worden.
+  const files = [
+    ...filesUnder(join(ROOT, "lib/ai")),
+    ...filesUnder(join(ROOT, "lib/planung")),
+    ...filesUnder(join(ROOT, "lib/trainerQuery")),
+  ].filter((f) => !f.endsWith(".test.ts"));
 
   it("findet die Dateien des Modellpfads", () => {
     const rel = files.map((f) => relative(ROOT, f));
@@ -36,6 +41,9 @@ describe("T3: kein service_role im Modellpfad", () => {
     expect(rel).toContain("lib/ai/gateway/db.ts");
     expect(rel).toContain("lib/ai/gateway/purposes.ts");
     expect(rel).toContain("lib/planung/squadCheckActions.ts");
+    // AP-70b (Security-Review I-3): der Trainer-Query-Modellpfad.
+    expect(rel).toContain("lib/trainerQuery/queryActions.ts");
+    expect(rel).toContain("lib/trainerQuery/spec.ts");
   });
 
   it("kein SERVICE_ROLE, kein service_role, kein NEXT_PUBLIC fuer Modell-Keys", () => {
@@ -76,10 +84,14 @@ describe("T3: kein service_role im Modellpfad", () => {
     expect(sawAny).toBe(false);
   });
 
-  it("die Registry selbst nennt genau die heute bekannten AP-69-Tueren", () => {
+  it("die Registry selbst nennt genau die heute bekannten Tueren (AP-69 und AP-70b)", () => {
     const allowed = allowedGatewayRpcNames();
     expect(allowed.has("rpc_squad_check_jev_context")).toBe(true);
     expect(allowed.has("rpc_finish_model_call")).toBe(true);
+    // AP-70b (Security-Review I-3): Tuer-Oeffner und Lese-Tuer der
+    // Trainer-Query-Funktion sind Teil der Registry.
+    expect(allowed.has("rpc_trainer_query_open")).toBe(true);
+    expect(allowed.has("rpc_trainer_morning_ops")).toBe(true);
   });
 
   it("lib/ai wird aus keiner Client-Komponente importiert", () => {

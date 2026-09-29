@@ -6,8 +6,12 @@
 //
 // Das Modell bekommt NUR state.session.question (die pseudonymisierte Frage)
 // und die sieben festen Choice-Fragen aus schema.ts -- state.athletes bleibt
-// bewusst ein leeres Array (kein Kaderdatum geht mit, auch nicht ungenutzt als
-// Kontext, ADR-019 I1-I7).
+// bewusst ein leeres Array. Security-Review I-2: auch die Choice-LISTEN selbst
+// duerfen keine Kaderdaten verraten -- player_ref traegt NUR die in der Frage
+// tatsaechlich erwaehnten P-Refs (nicht die volle Kadergroesse), position NUR
+// die vier festen Kategorien aus schema.ts (nie den rohen, frei gepflegten
+// person_position-Freitext). Kein Klarname, keine echte Rueckennummer, keine
+// Kadergroesse, kein Freitext-Feld geht an das Modell (ADR-019 I1-I7).
 
 import "server-only";
 import { askJev } from "@/lib/ai/jev";
@@ -21,12 +25,12 @@ import {
   type TrainerQueryContext,
   type TrainerQueryEvaluation,
 } from "./evaluate";
-import type { ResolvedPlayerRef } from "./resolve";
 import {
   BAND_CRITERIA,
   CHECKIN_CRITERIA,
   CLEARANCE_CRITERIA,
   INTENT_CRITERIA,
+  POSITION_MODEL_CHOICES,
   TRAINER_QUERY_OUTPUT_ALLOWLIST,
   UNSUPPORTED_REASON_CRITERIA,
   playerRefCriteria,
@@ -34,19 +38,6 @@ import {
 } from "./schema";
 
 export type { TrainerQueryContext } from "./evaluate";
-
-function distinctPositions(refs: readonly ResolvedPlayerRef[]): string[] {
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const r of refs) {
-    const p = r.position.trim();
-    if (p && !seen.has(p)) {
-      seen.add(p);
-      out.push(p);
-    }
-  }
-  return out.sort();
-}
 
 export function buildTrainerQueryRequest(ctx: TrainerQueryContext): JevRequest | null {
   if (!ctx.pseudonymizedQuestion.trim()) return null;
@@ -73,7 +64,9 @@ export function buildTrainerQueryRequest(ctx: TrainerQueryContext): JevRequest |
     clearance: {
       type: "choice",
       instructions: {
-        question: "Which medical clearance state, if any, does the coach's question filter by?",
+        // M1 (Security-Review): kein "medical" im gesendeten Prompt-Text
+        // (G-01-Sperrbegriff), auch wenn nur die rohe Anfrage betroffen waere.
+        question: "Which clearance state, if any, does the coach's question filter by?",
         inspect: "session.question",
         focus: ctx.pseudonymizedQuestion,
       },
@@ -95,7 +88,9 @@ export function buildTrainerQueryRequest(ctx: TrainerQueryContext): JevRequest |
         inspect: "session.question",
         focus: ctx.pseudonymizedQuestion,
       },
-      criteria: positionCriteria(ctx.positions),
+      // I-2 (Security-Review): feste Kategorien aus schema.ts, nie der rohe
+      // person_position-Freitext des Teams.
+      criteria: positionCriteria(POSITION_MODEL_CHOICES),
     },
     player_ref: {
       type: "choice",
@@ -104,7 +99,10 @@ export function buildTrainerQueryRequest(ctx: TrainerQueryContext): JevRequest |
         inspect: "session.question",
         focus: ctx.pseudonymizedQuestion,
       },
-      criteria: playerRefCriteria(ctx.refs.map((r) => r.ref)),
+      // I-2 (Security-Review): NUR die in der Frage tatsaechlich erwaehnten
+      // Refs (resolve.ts::mentionedRefs), nicht die volle Kaderliste -- sonst
+      // verraet die Choice-Liste selbst die exakte Kadergroesse ans Modell.
+      criteria: playerRefCriteria(ctx.mentionedRefs.map((r) => r.ref)),
     },
     unsupported_reason: {
       type: "choice",
@@ -172,8 +170,7 @@ function guardEvaluation(
 export function buildTrainerQuerySpec(
   input: TrainerQuerySpecInput,
 ): ModelCallSpec<typeof AP70_TRAINER_QUERY> {
-  const positions = distinctPositions(input.ctx.refs);
-  const ctx: TrainerQueryContext = { ...input.ctx, positions };
+  const ctx: TrainerQueryContext = input.ctx;
   const fallback: TrainerQueryEvaluation = { kind: "unsupported", reason: "other" };
 
   return {
@@ -190,8 +187,7 @@ export function buildTrainerQuerySpec(
     parse: (body, c) => {
       const result = parseTrainerQueryAnswers(
         body,
-        c.refs.map((r) => r.ref),
-        c.positions,
+        c.mentionedRefs.map((r) => r.ref),
         input.minConfidence,
       );
       return result;
