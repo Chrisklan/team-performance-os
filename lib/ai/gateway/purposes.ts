@@ -16,6 +16,13 @@
 import type { JevContext, JevOverlay } from "@/lib/planung/types";
 import type { JevValidation } from "@/lib/planung/jevSquadCheck";
 import type { JevRequest } from "@/lib/ai/jevTypes";
+// AP-70b: reine Typ-Importe fuer die Trainer-Query-Funktion, kein
+// Next/Supabase-Laufzeit-Import (wie oben).
+import type {
+  ParsedTrainerQueryAnswers,
+  TrainerQueryContext,
+  TrainerQueryEvaluation,
+} from "@/lib/trainerQuery/evaluate";
 
 export type GatewayProvider = "jev";
 
@@ -35,8 +42,15 @@ export type PurposeSpec = {
 };
 
 export const AP69_SQUAD_CHECK = "ap69_squad_check" as const;
+// AP-70b: Trainer-Query-Funktion. Eigene Tuer (app.rpc_trainer_query_open,
+// backend/48_trainer_query.sql), eigene Lese-Tuer fuer den Kader-Payload
+// (public.rpc_trainer_morning_ops -- dieselbe Tuer wie das Trainer-Dashboard,
+// AP-30). Der Kader-Payload wird NIE an das Modell weitergereicht (siehe
+// lib/trainerQuery/resolve.ts/spec.ts) -- dataDoors ist trotzdem noetig, weil
+// queryActions.ts ihn fuer die deterministische Auswertung selbst lesen muss.
+export const AP70_TRAINER_QUERY = "ap70_trainer_query" as const;
 
-export type PurposeKey = typeof AP69_SQUAD_CHECK;
+export type PurposeKey = typeof AP69_SQUAD_CHECK | typeof AP70_TRAINER_QUERY;
 
 // Code-Review P1 (Fixrunde): bindet ModelCallSpec<P> (lib/ai/gateway/run.ts)
 // strukturell an das jeweilige purpose-Feld. Vorher hatte ModelCallSpec vier
@@ -51,6 +65,12 @@ export interface PurposeTypeMap {
     Parsed: JevValidation;
     Out: JevOverlay[];
   };
+  [AP70_TRAINER_QUERY]: {
+    Ctx: TrainerQueryContext;
+    Req: JevRequest;
+    Parsed: ParsedTrainerQueryAnswers;
+    Out: TrainerQueryEvaluation;
+  };
 }
 
 // Abschluss-Tuer ist fuer jeden Zweck dieselbe (app.rpc_finish_model_call).
@@ -60,6 +80,14 @@ export const GATEWAY_PURPOSES: Record<PurposeKey, PurposeSpec> = {
   [AP69_SQUAD_CHECK]: {
     openDoor: "rpc_squad_check_jev_context",
     dataDoors: [],
+    writeDoors: [],
+    provider: "jev",
+  },
+  [AP70_TRAINER_QUERY]: {
+    openDoor: "rpc_trainer_query_open",
+    // Dieselbe Tuer wie das Trainer-Dashboard (AP-30) -- liefert NUR den post-RLS
+    // Kader-Payload der eigenen Person, keine Sonderrechte fuer den Modellpfad.
+    dataDoors: ["rpc_trainer_morning_ops"],
     writeDoors: [],
     provider: "jev",
   },
