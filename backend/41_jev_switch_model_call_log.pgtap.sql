@@ -142,7 +142,12 @@ INSERT INTO app.load_deviations (team_id, person_id, metric, date, deviation, st
 INSERT INTO app.training_sessions (id, team_id, session_date, duration_min, session_type, planned_intensity, created_by) VALUES
   ('b1200000-0000-0000-0000-000000000001','b1000000-0000-0000-0000-000000000001', current_date, 60, 'field', 6, 'b1100000-0000-0000-0000-000000000002'),
   ('b1200000-0000-0000-0000-000000000002','b1000000-0000-0000-0000-000000000001', current_date + 1, 60, 'gym', 6, 'b1100000-0000-0000-0000-000000000002'),
-  ('b1200000-0000-0000-0000-000000000008','b1000000-0000-0000-0000-000000000008', current_date, 60, 'field', 6, 'b1100000-0000-0000-0000-000000000008');
+  ('b1200000-0000-0000-0000-000000000008','b1000000-0000-0000-0000-000000000008', current_date, 60, 'field', 6, 'b1100000-0000-0000-0000-000000000008'),
+  -- Punkt 86 Root-Fix (2026-09-29): planned_intensity NULL, eigens fuer den
+  -- Validierungstest unten -- seit dem Root-Fix kommt die Intensitaet aus
+  -- DIESER Zeile, nicht mehr aus dem Client-Parameter, ein clientseitig
+  -- ungueltiger Wert (z.B. 0) wird gar nicht mehr gelesen.
+  ('b1200000-0000-0000-0000-000000000009','b1000000-0000-0000-0000-000000000001', current_date, 60, 'field', NULL, 'b1100000-0000-0000-0000-000000000002');
 
 -- -----------------------------------------------------------------------------
 -- 1. Struktur: model_call_log/model_call_subjects ohne Inhalt, ohne Client
@@ -187,7 +192,7 @@ SELECT throws_ok(
   '23514', NULL, 'CHECK: unbekannter Zweck wird abgelehnt');
 SELECT ok(NOT has_function_privilege('authenticated', 'app._module_flag_setters(text)', 'EXECUTE'),
   'authenticated darf app._module_flag_setters nicht direkt ausfuehren');
-SELECT ok(NOT has_function_privilege('anon', 'public.rpc_squad_check_jev_context(uuid,smallint,smallint)', 'EXECUTE'),
+SELECT ok(NOT has_function_privilege('anon', 'public.rpc_squad_check_jev_context(uuid,smallint,smallint,text)', 'EXECUTE'),
   'Tuer rpc_squad_check_jev_context nicht fuer anon');
 SELECT ok(NOT has_function_privilege('anon', 'public.rpc_finish_model_call(bigint,text,integer,uuid)', 'EXECUTE'),
   'Tuer rpc_finish_model_call nicht fuer anon');
@@ -221,23 +226,31 @@ SELECT throws_ok($$ SELECT app.rpc_set_module_flag('jev_squad_check_enabled', NU
 -- -----------------------------------------------------------------------------
 -- 3. JEV-Kontext: Rollen, Team, Schalter, Entwurf
 -- -----------------------------------------------------------------------------
+-- Punkt 87 Nachtrag (2026-09-29, backend/44_jev_rate_limit_and_finish_token.sql):
+-- app.rpc_squad_check_jev_context verlangt jetzt zusaetzlich p_context_secret.
+-- Als Superuser gesetzt, genau wie das Ops-Setup-Skript es per service_role
+-- taete -- dieser Aufruf ist kein Teil des in diesem File getesteten
+-- Anfragepfads. Ein falsches/fehlendes Secret wird eigens in
+-- backend/44_jev_rate_limit_and_finish_token.pgtap.sql geprueft.
+SELECT app.rpc_set_jev_context_secret('t41-test-secret-mindestens-20-zeichen');
+
 SELECT set_config('request.jwt.claims', '', true);
-SELECT ok(app.is_denial(app.rpc_squad_check_jev_context('b1200000-0000-0000-0000-000000000001', 60::smallint, 6::smallint)),
+SELECT ok(app.is_denial(app.rpc_squad_check_jev_context('b1200000-0000-0000-0000-000000000001', 60::smallint, 6::smallint, 't41-test-secret-mindestens-20-zeichen')),
   'ohne bestaetigte Claims: deny');
 SELECT app._t41_jwt('b1100000-0000-0000-0000-000000000011', 'player');
-SELECT ok(app.is_denial(app.rpc_squad_check_jev_context('b1200000-0000-0000-0000-000000000001', 60::smallint, 6::smallint)),
+SELECT ok(app.is_denial(app.rpc_squad_check_jev_context('b1200000-0000-0000-0000-000000000001', 60::smallint, 6::smallint, 't41-test-secret-mindestens-20-zeichen')),
   'player: FORBIDDEN');
 SELECT app._t41_jwt('b1100000-0000-0000-0000-000000000005', 'admin');
-SELECT ok(app.is_denial(app.rpc_squad_check_jev_context('b1200000-0000-0000-0000-000000000001', 60::smallint, 6::smallint)),
+SELECT ok(app.is_denial(app.rpc_squad_check_jev_context('b1200000-0000-0000-0000-000000000001', 60::smallint, 6::smallint, 't41-test-secret-mindestens-20-zeichen')),
   'admin: FORBIDDEN (nur Staff)');
 SELECT app._t41_jwt('b1100000-0000-0000-0000-000000000004', 'doctor');
-SELECT ok(app.is_denial(app.rpc_squad_check_jev_context('b1200000-0000-0000-0000-000000000001', 60::smallint, 6::smallint)),
+SELECT ok(app.is_denial(app.rpc_squad_check_jev_context('b1200000-0000-0000-0000-000000000001', 60::smallint, 6::smallint, 't41-test-secret-mindestens-20-zeichen')),
   'doctor: FORBIDDEN');
 
 SELECT app._t41_jwt('b1100000-0000-0000-0000-000000000002', 'coach');
-SELECT throws_ok($$ SELECT app.rpc_squad_check_jev_context('b1200000-0000-0000-0000-000000000008', 60::smallint, 6::smallint) $$,
+SELECT throws_ok($$ SELECT app.rpc_squad_check_jev_context('b1200000-0000-0000-0000-000000000008', 60::smallint, 6::smallint, 't41-test-secret-mindestens-20-zeichen') $$,
   'P0002', NULL, 'fremdes Team: P0002');
-SELECT throws_ok($$ SELECT app.rpc_squad_check_jev_context('b1200000-0000-0000-0000-000000000001', 60::smallint, 6::smallint) $$,
+SELECT throws_ok($$ SELECT app.rpc_squad_check_jev_context('b1200000-0000-0000-0000-000000000001', 60::smallint, 6::smallint, 't41-test-secret-mindestens-20-zeichen') $$,
   '55000', 'MODULE_DISABLED', 'Schalter aus: 55000 MODULE_DISABLED');
 SELECT is((SELECT count(*)::int FROM app.model_call_log WHERE team_id = 'b1000000-0000-0000-0000-000000000001'), 0,
   'Schalter aus: keine Protokollzeile');
@@ -265,18 +278,23 @@ SELECT is((SELECT set_by_role::text FROM app.module_flags
 SELECT app._t41_jwt('b1100000-0000-0000-0000-000000000002', 'coach');
 SELECT ok(app.rpc_get_module_flag('jev_squad_check_enabled'), 'coach liest den JEV-Schalter als an');
 
-SELECT is(app.rpc_squad_check_jev_context(NULL, 60::smallint, 6::smallint),
+SELECT is(app.rpc_squad_check_jev_context(NULL, 60::smallint, 6::smallint, 't41-test-secret-mindestens-20-zeichen'),
   '{"refs": [], "call_id": null, "candidates": []}'::jsonb, 'Entwurf ohne session_id: leer');
 SELECT is((SELECT count(*)::int FROM app.model_call_log WHERE team_id = 'b1000000-0000-0000-0000-000000000001'), 0,
   'Entwurf: keine Protokollzeile');
-SELECT throws_ok($$ SELECT app.rpc_squad_check_jev_context('b1200000-0000-0000-0000-000000000001', 60::smallint, 0::smallint) $$,
-  '22023', NULL, 'Intensitaet 0: 22023');
+-- Root-Fix Punkt 86a (2026-09-29): die Intensitaet kommt jetzt aus der
+-- gespeicherten Session, nicht mehr aus p_planned_intensity -- der Client-Wert
+-- hier (6, gueltig) wird deshalb bewusst NICHT mehr auf 0 gesetzt, das waere
+-- seit dem Fix wirkungslos. Stattdessen traegt die Session selbst (...0009)
+-- KEINE Intensitaet (NULL), das ist jetzt der einzige Weg zu diesem 22023.
+SELECT throws_ok($$ SELECT app.rpc_squad_check_jev_context('b1200000-0000-0000-0000-000000000009', 60::smallint, 6::smallint, 't41-test-secret-mindestens-20-zeichen') $$,
+  '22023', NULL, 'Root-Fix Punkt 86a: Session ohne planned_intensity (NULL) wirft 22023');
 
 -- -----------------------------------------------------------------------------
 -- 4. Kandidatenfilter und Payload, LoadDeviation-Modul AUS
 -- -----------------------------------------------------------------------------
 CREATE TEMP TABLE t41a AS
-  SELECT app.rpc_squad_check_jev_context('b1200000-0000-0000-0000-000000000001', 60::smallint, 6::smallint) AS c;
+  SELECT app.rpc_squad_check_jev_context('b1200000-0000-0000-0000-000000000001', 60::smallint, 6::smallint, 't41-test-secret-mindestens-20-zeichen') AS c;
 
 SELECT is((SELECT app._t41_cand_people(c) FROM t41a),
   ARRAY['b1100000-0000-0000-0000-000000000013','b1100000-0000-0000-0000-000000000014'],
@@ -325,16 +343,18 @@ SELECT is((SELECT (SELECT array_agg(e ->> 'ref' ORDER BY e ->> 'ref') FROM jsonb
   'refs uebersetzt genau die Pseudonyme der Kandidaten zurueck');
 
 -- Hash: dieselben Eingaben, anderes Zufallspseudonym -> derselbe Hash.
--- Punkt 86 (2026-09-29, backend/44_jev_rate_limit_and_finish_token.sql): ein
--- zweiter Aufruf mit identischem input_hash innerhalb von 5 Minuten wird jetzt
--- gedrosselt (RATE_LIMITED). t41a's occurred_at wird dafuer kurz auf "vor 6
--- Minuten" gesetzt, direkt danach wieder auf "jetzt" zurueckgesetzt, damit die
+-- Punkt 86 (Nachtrag 2026-09-29, backend/44_jev_rate_limit_and_finish_token.sql):
+-- die Drosselung ist inzwischen zaehlbasiert (max. c_rate_limit_max_calls pro
+-- Person/Fenster), nicht mehr Hash-exakt -- ein zweiter Aufruf mit
+-- identischem input_hash blockt hier also NICHT sofort, das Backdaten/
+-- Zuruecksetzen von t41a's occurred_at dient nur noch dazu, t41a fuer die
 -- Finish-Tests in Abschnitt 7 (5-Minuten-Fenster von rpc_finish_model_call)
--- unveraendert gelten.
+-- auf einem frischen Zeitstempel zu halten, nicht mehr dem Umgehen einer
+-- sofortigen Drosselung.
 UPDATE app.model_call_log SET occurred_at = now() - interval '6 minutes'
  WHERE id = (SELECT (c ->> 'call_id')::bigint FROM t41a);
 CREATE TEMP TABLE t41b AS
-  SELECT app.rpc_squad_check_jev_context('b1200000-0000-0000-0000-000000000001', 60::smallint, 6::smallint) AS c;
+  SELECT app.rpc_squad_check_jev_context('b1200000-0000-0000-0000-000000000001', 60::smallint, 6::smallint, 't41-test-secret-mindestens-20-zeichen') AS c;
 UPDATE app.model_call_log SET occurred_at = now()
  WHERE id = (SELECT (c ->> 'call_id')::bigint FROM t41a);
 SELECT is((SELECT count(*)::int FROM app.model_call_log WHERE team_id = 'b1000000-0000-0000-0000-000000000001'), 2,
@@ -342,11 +362,17 @@ SELECT is((SELECT count(*)::int FROM app.model_call_log WHERE team_id = 'b100000
 SELECT is((SELECT input_hash FROM app.model_call_log WHERE id = (SELECT (c ->> 'call_id')::bigint FROM t41b)),
           (SELECT input_hash FROM app.model_call_log WHERE id = (SELECT (c ->> 'call_id')::bigint FROM t41a)),
   'input_hash haengt nicht vom Pseudonym ab (ref nicht im Hash)');
+-- Root-Fix Punkt 86a (2026-09-29): p_duration_min=65 ist ein frei erfundener
+-- Client-Wert -- die Tuer liest duration_min jetzt aus der gespeicherten
+-- Session (weiterhin 60), der Hash ist deshalb IDENTISCH zu t41a, nicht mehr
+-- verschieden (vor dem Fix waere das der Weg gewesen, die alte Hash-basierte
+-- Drosselung durch Variation eines Eingabewerts zu umgehen).
 CREATE TEMP TABLE t41c AS
-  SELECT app.rpc_squad_check_jev_context('b1200000-0000-0000-0000-000000000001', 65::smallint, 6::smallint) AS c;
-SELECT isnt((SELECT input_hash FROM app.model_call_log WHERE id = (SELECT (c ->> 'call_id')::bigint FROM t41c)),
-            (SELECT input_hash FROM app.model_call_log WHERE id = (SELECT (c ->> 'call_id')::bigint FROM t41a)),
-  'andere Eingaben (Dauer 65, gleiche Kandidaten) -> anderer Hash');
+  SELECT app.rpc_squad_check_jev_context('b1200000-0000-0000-0000-000000000001', 65::smallint, 6::smallint, 't41-test-secret-mindestens-20-zeichen') AS c;
+SELECT is((SELECT input_hash FROM app.model_call_log WHERE id = (SELECT (c ->> 'call_id')::bigint FROM t41c)),
+          (SELECT input_hash FROM app.model_call_log WHERE id = (SELECT (c ->> 'call_id')::bigint FROM t41a)),
+  'Root-Fix Punkt 86a: ein frei erfundener Client-Wert fuer duration_min (65 statt der '
+  'gespeicherten 60) aendert den Hash NICHT mehr -- die Tuer liest duration_min aus der Session');
 
 -- -----------------------------------------------------------------------------
 -- 5. Kandidatenfilter mit LoadDeviation-Modul AN
@@ -355,7 +381,7 @@ SELECT app._t41_jwt('b1100000-0000-0000-0000-000000000004', 'doctor');
 SELECT ok(NOT app.is_denial(app.rpc_set_module_flag('loaddeviation_enabled', true)), 'doctor schaltet LoadDeviation ein');
 SELECT app._t41_jwt('b1100000-0000-0000-0000-000000000002', 'coach');
 CREATE TEMP TABLE t41d AS
-  SELECT app.rpc_squad_check_jev_context('b1200000-0000-0000-0000-000000000001', 60::smallint, 6::smallint) AS c;
+  SELECT app.rpc_squad_check_jev_context('b1200000-0000-0000-0000-000000000001', 60::smallint, 6::smallint, 't41-test-secret-mindestens-20-zeichen') AS c;
 SELECT is((SELECT app._t41_cand_people(c) FROM t41d),
   ARRAY['b1100000-0000-0000-0000-000000000013','b1100000-0000-0000-0000-000000000014','b1100000-0000-0000-0000-000000000019'],
   'Modul an: Q9 kommt ueber h4 dazu, QA (nur pain_max/unveroeffentlicht) weiterhin nicht');
@@ -371,14 +397,14 @@ SELECT ok((SELECT NOT ((c -> 'candidates')::text ILIKE '%pain%') FROM t41d), 'ke
 SELECT ok(NOT app.is_denial(app.rpc_dismiss_session_hint('b1200000-0000-0000-0000-000000000001', 'b1100000-0000-0000-0000-000000000013', 'j1')), 'j1 fuer Q3 weg');
 SELECT ok(NOT app.is_denial(app.rpc_dismiss_session_hint('b1200000-0000-0000-0000-000000000001', 'b1100000-0000-0000-0000-000000000014', 'j1')), 'j1 fuer Q4 weg');
 SELECT ok(NOT app.is_denial(app.rpc_dismiss_session_hint('b1200000-0000-0000-0000-000000000001', 'b1100000-0000-0000-0000-000000000019', 'h4')), 'h4 fuer Q9 weg');
-SELECT is(app.rpc_squad_check_jev_context('b1200000-0000-0000-0000-000000000001', 60::smallint, 6::smallint),
+SELECT is(app.rpc_squad_check_jev_context('b1200000-0000-0000-0000-000000000001', 60::smallint, 6::smallint, 't41-test-secret-mindestens-20-zeichen'),
   '{"refs": [], "call_id": null, "candidates": []}'::jsonb, 'alle Kandidaten weggeklickt: leer');
 SELECT is((SELECT count(*)::int FROM app.model_call_log WHERE team_id = 'b1000000-0000-0000-0000-000000000001'), 4,
   'ohne Kandidaten keine neue Protokollzeile (weiterhin vier)');
 -- Die zweite Einheit (morgen, Typ gym) ist davon unberuehrt: Wegklicks gelten je
 -- Einheit. Dort sind Q3, Q4, Q9 und auch QB (j1 nur fuer Einheit 1) und QC (h1 nur
 -- fuer Einheit 1) Kandidaten.
-SELECT is(array_length(app._t41_cand_people(app.rpc_squad_check_jev_context('b1200000-0000-0000-0000-000000000002', 60::smallint, 6::smallint)), 1),
+SELECT is(array_length(app._t41_cand_people(app.rpc_squad_check_jev_context('b1200000-0000-0000-0000-000000000002', 60::smallint, 6::smallint, 't41-test-secret-mindestens-20-zeichen')), 1),
   5, 'Wegklicks gelten je Einheit: die zweite Einheit hat fuenf Kandidaten');
 
 -- -----------------------------------------------------------------------------
@@ -431,7 +457,7 @@ SELECT is((SELECT count(*)::int FROM pg_proc p
               AND p.proname IN ('_module_flag_setters','rpc_set_module_flag','rpc_squad_check_jev_context','rpc_finish_model_call')),
   7, 'T2 prueft alle sieben Funktionen (vier app, drei Tueren)');
 SELECT ok((SELECT prosrc !~* 'rpc_set_clearance|medical_status_badge|value_sport' FROM pg_proc
-            WHERE oid = 'app.rpc_squad_check_jev_context(uuid,smallint,smallint)'::regprocedure),
+            WHERE oid = 'app.rpc_squad_check_jev_context(uuid,smallint,smallint,text)'::regprocedure),
   'T2: die JEV-Tuer ruft weder rpc_set_clearance noch Badge oder value_sport');
 
 -- -----------------------------------------------------------------------------

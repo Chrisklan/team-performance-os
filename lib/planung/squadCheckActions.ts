@@ -11,6 +11,11 @@
 //   1. Betreiber-Notaus: JEV_ENABLED nicht "true" oder kein Key -> off.
 //   2. public.rpc_squad_check_jev_context (legt die pending-Protokollzeile an).
 //      Fehler, Ablehnung, 55000 -> fallback. Keine Kandidaten -> no_candidates.
+//      Punkt 87 Nachtrag (2026-09-29): die Tuer verlangt zusaetzlich das
+//      Server-Secret aus JEV_CONTEXT_SECRET (nie NEXT_PUBLIC_, nie an den
+//      Browser) -- ohne oder mit falschem Secret lehnt sie ab, BEVOR
+//      irgendeine Zeile entsteht (schliesst Phantom-Zeilen, siehe Kopfkommentar
+//      von supabase/migrations/20260929110000_jev_rate_limit_and_finish_token.sql).
 //   3. Request nur aus den Kandidaten, Frage als Konstante (jevSquadCheck.ts).
 //   4. fetch mit Timeout, cache no-store, keine Wiederholung, keine Bodies im Log.
 //   5. Harte Pruefung je ref, Hinweis nur bei choice "reduced" und Konfidenz ab
@@ -47,6 +52,14 @@ function validIntensity(value: number): boolean {
 }
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+// Punkt 87 Nachtrag (2026-09-29): rein serverseitig gelesen, nie an den
+// Browser gereicht (runJevSquadCheck gibt nur status/overlays zurueck). Ohne
+// gesetztes Secret schlaegt die RPC ab -> fallback, wie jeder andere Fehler
+// in diesem Pfad (kein Sonderfall noetig, siehe Ablaufkommentar oben).
+function jevContextSecret(): string | null {
+  return process.env.JEV_CONTEXT_SECRET?.trim() || null;
+}
 
 function isDenial(value: unknown): boolean {
   return (
@@ -162,6 +175,7 @@ export async function runJevSquadCheck(
       p_session_id: sessionId,
       p_duration_min: durationMin,
       p_planned_intensity: intensity,
+      p_context_secret: jevContextSecret(),
     });
     if (error || !data || isDenial(data)) return FALLBACK;
     ctx = data as JevContext;
