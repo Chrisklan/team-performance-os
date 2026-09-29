@@ -1,10 +1,14 @@
 // Team Performance OS — Gateway-Konfiguration (AP-70a): Betreiber-Notaus und
 // Server-Secret fuer die Tuer-Oeffner. NUR serverseitig.
 //
-// Getrennt von lib/ai/jev.ts::readJevConfig (Provider-Einstellungen wie Modell/
-// Timeout/Mindest-Konfidenz -- AP-69-spezifisch, bleibt dort). Diese Datei
-// haelt die zwei Werte, die JEDER Zweck braucht: das Betreiber-Notaus
-// (JEV_ENABLED + ein Key) und das Server-Secret fuer die Kontext-Tueren.
+// AP-70b Konsolidierung: readGatewaySwitchConfig ist die EINZIGE Quelle fuer
+// das Betreiber-Notaus (enabled) und den API-Key (JEV_ENABLED/OPENROUTER_API_KEY).
+// lib/ai/jev.ts::readJevConfig ruft diese Funktion auf und ergaenzt nur noch die
+// AP-69-spezifischen Provider-Einstellungen (Modell/Timeout/Mindest-Konfidenz).
+// Vorher standen enabled/apiKey redundant in beiden Dateien -- eine Aenderung an
+// einer Stelle wirkte nicht zuverlaessig auf die andere. Diese Datei haelt die
+// zwei Werte, die JEDER Zweck braucht: das Betreiber-Notaus und das Server-Secret
+// fuer die Kontext-Tueren.
 
 import "server-only";
 

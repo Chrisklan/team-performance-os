@@ -17,6 +17,14 @@
 // lib/ai/guardrails.test.ts bleibt als zweite Ebene.
 import "server-only";
 import type { JevRequest } from "@/lib/ai/jevTypes";
+// AP-70b Konsolidierung: enabled/apiKey kamen bisher redundant sowohl hier ALS
+// AUCH in lib/ai/gateway/config.ts::readGatewaySwitchConfig aus derselben
+// Umgebungsvariablen-Logik (JEV_ENABLED/OPENROUTER_API_KEY) -- eine Aenderung
+// an einer Stelle wirkte nicht zuverlaessig auf die andere. readGatewaySwitchConfig
+// ist jetzt die EINZIGE Quelle fuer das Betreiber-Notaus (enabled) und den API-Key,
+// readJevConfig ruft sie auf und ergaenzt nur noch die AP-69-spezifischen Felder
+// (provider/model/timeoutMs/minConfidence).
+import { readGatewaySwitchConfig } from "@/lib/ai/gateway/config";
 
 export const OPENROUTER_DECISIONS_ENDPOINT = "https://openrouter.ai/api/alpha/decisions";
 
@@ -44,12 +52,15 @@ function numberFromEnv(raw: string | undefined, fallback: number): number {
 
 // Betreiber-Notaus: JEV laeuft nur, wenn JEV_ENABLED exakt "true" ist UND ein
 // Key vorhanden ist. Unabhaengig vom Team-Schalter in app.module_flags.
+// enabled/apiKey kommen aus readGatewaySwitchConfig (einzige Quelle, siehe
+// Kopfkommentar) -- unveraendertes Verhalten (dieselbe JEV_ENABLED/
+// OPENROUTER_API_KEY-Logik wie zuvor hier direkt).
 export function readJevConfig(env: NodeJS.ProcessEnv = process.env): JevConfig {
-  const apiKey = env.OPENROUTER_API_KEY?.trim() || null;
+  const { enabled, apiKey } = readGatewaySwitchConfig(env);
   const timeoutMs = numberFromEnv(env.JEV_TIMEOUT_MS, 3000);
   const minConfidence = numberFromEnv(env.JEV_MIN_CONFIDENCE, 0.7);
   return {
-    enabled: env.JEV_ENABLED === "true" && apiKey !== null,
+    enabled,
     provider: env.JEV_PROVIDER?.trim() || "openrouter",
     model: env.JEV_MODEL?.trim() || null,
     apiKey,
