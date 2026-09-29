@@ -11,6 +11,20 @@
 -- eindeutig -- das Pseudonym waere trivial aufloesbar, das Schreddern liefe
 -- ins Leere. Fix: Schritt 5 setzt diese drei Felder zusaetzlich auf NULL.
 --
+-- Nachtrag Security-/Code-Review (2026-09-29, HOCH, Punkt 89 unvollstaendig):
+-- app.persons traegt seit 20260924000045_baseline_engine.sql zusaetzlich
+-- primary_position (text) und secondary_positions (text[]) -- dieselbe Art
+-- Quasi-Identifikator, im ersten Wurf dieser Migration schlicht uebersehen,
+-- weil sie erst nach dem urspruenglichen Entwurf von Punkt 89 entstanden.
+-- Fix: Schritt 5 setzt jetzt auch diese beiden Felder auf NULL, die
+-- Idempotenzbedingung ist entsprechend erweitert. Zusaetzlich haertet
+-- backend/46_shred_person_hardening.pgtap.sql jetzt generisch: ein Test
+-- vergleicht ALLE Spalten von app.persons (information_schema.columns) gegen
+-- eine explizite Whitelist "nach dem Shred erlaubt stehenzubleiben" -- jede
+-- kuenftig neu hinzugefuegte Spalte, die nicht auf der Whitelist steht, faellt
+-- damit automatisch auf, statt wie primary_position/secondary_positions erst
+-- beim naechsten Review entdeckt zu werden.
+--
 -- created_at bewusst NICHT ueberschrieben, Begruendung (pragmatische
 -- Entscheidung, wie beauftragt):
 --   1. created_at ist ein Systemfeld (Zeitpunkt des INSERT), keine fachliche
@@ -260,6 +274,15 @@ BEGIN
          shirt_number     = NULL,
          person_position  = NULL,
          position_cluster = NULL,
+         -- Nachtrag Review-Fund (2026-09-29, HOCH): baseline_engine
+         -- (20260924000045) hat primary_position/secondary_positions zu
+         -- app.persons hinzugefuegt, NACH dem urspruenglichen Entwurf von
+         -- Punkt 89 -- sie fehlten deshalb im ersten Wurf dieser Migration.
+         -- Beide sind exakt dieselbe Art Quasi-Identifikator wie
+         -- person_position/position_cluster (Positionsangabe der Person) und
+         -- muessen aus demselben Grund auf NULL.
+         primary_position     = NULL,
+         secondary_positions  = NULL,
          updated_at      = v_now
    WHERE id = p_person_id
      AND team_id = v_team_id
@@ -270,7 +293,9 @@ BEGIN
           OR display_name NOT LIKE 'SCRAPED-%'
           OR shirt_number IS NOT NULL
           OR person_position IS NOT NULL
-          OR position_cluster IS NOT NULL);
+          OR position_cluster IS NOT NULL
+          OR primary_position IS NOT NULL
+          OR secondary_positions IS NOT NULL);
 
   -- ---------------------------------------------------------------------------
   -- 6. audit_log. Laeuft ZULETZT, und das ist der Grundsatz des ganzen Pfads:
@@ -352,8 +377,10 @@ COMMENT ON FUNCTION app.rpc_shred_person(uuid) IS
   '2026-09-27 (Review-Fund): Schritt 2b, sechs bislang uebersehene Tabellen mit '
   'person_id/team_id (baselines, metric_deviations, readiness_score, '
   'readiness_factors_coach, readiness_factor_medical, session_rpe) ergaenzt. '
-  'Punkt 89 (2026-09-29, WICHTIGSTER Fund): shirt_number/person_position/position_cluster '
-  'werden in Schritt 5 zusaetzlich auf NULL gesetzt (Quasi-Identifikatoren, sonst trivial '
-  'aufloesbares Pseudonym) -- created_at bleibt bewusst stehen, Begruendung im Kopfkommentar '
-  'von backend/46_shred_person_hardening.sql. Punkt 92: die sechs DELETEs aus Schritt 2b '
-  'filtern nur noch auf person_id, nicht mehr zusaetzlich auf team_id.';
+  'Punkt 89 (2026-09-29, WICHTIGSTER Fund): shirt_number/person_position/position_cluster/'
+  'primary_position/secondary_positions werden in Schritt 5 zusaetzlich auf NULL gesetzt '
+  '(Quasi-Identifikatoren, sonst trivial aufloesbares Pseudonym) -- created_at bleibt bewusst '
+  'stehen, Begruendung im Kopfkommentar von backend/46_shred_person_hardening.sql. '
+  'Nachtrag (2026-09-29, Review-Fund): primary_position/secondary_positions (baseline_engine, '
+  '20260924000045) im ersten Wurf uebersehen, jetzt ergaenzt. Punkt 92: die sechs DELETEs aus '
+  'Schritt 2b filtern nur noch auf person_id, nicht mehr zusaetzlich auf team_id.';
