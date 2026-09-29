@@ -125,12 +125,16 @@ async function finishCall(
   callId: number,
   resultClass: ModelCallResultClass,
   latencyMs: number | null,
+  finishToken: string,
 ): Promise<void> {
   try {
     await supabase.rpc("rpc_finish_model_call", {
       p_call_id: callId,
       p_result_class: resultClass,
       p_latency_ms: latencyMs === null ? null : Math.max(0, Math.round(latencyMs)),
+      // Punkt 87 (2026-09-29): ohne das aus rpc_squad_check_jev_context
+      // stammende Token lehnt die Tuer den Abschluss ab (deny).
+      p_finish_token: finishToken,
     });
   } catch {
     // Bewusst ignoriert: die Protokollzeile bleibt pending sichtbar.
@@ -169,19 +173,25 @@ export async function runJevSquadCheck(
     return { status: "no_candidates", overlays: [] };
   }
   const callId = ctx.call_id;
+  // Punkt 87 (2026-09-29): ohne Token kann kein Abschluss verifiziert werden,
+  // die Zeile bleibt bewusst pending statt einen Abschluss ohne Nachweis zu riskieren.
+  const finishToken = typeof ctx.finish_token === "string" ? ctx.finish_token : null;
+  if (!finishToken) {
+    return FALLBACK;
+  }
 
   try {
     // Das Modell kommt aus der Tuer (dort protokolliert, festgeschrieben). Ein
     // abweichend konfiguriertes JEV_MODEL wird nicht still benutzt.
     const model = typeof ctx.model === "string" ? ctx.model : null;
     if (!model || (config.model !== null && config.model !== model)) {
-      await finishCall(supabase, callId, "invalid", null);
+      await finishCall(supabase, callId, "invalid", null, finishToken);
       return FALLBACK;
     }
 
     const request = buildJevRequest(ctx);
     if (!request) {
-      await finishCall(supabase, callId, "invalid", null);
+      await finishCall(supabase, callId, "invalid", null, finishToken);
       return FALLBACK;
     }
 
@@ -191,13 +201,13 @@ export async function runJevSquadCheck(
         // Nur der Statuscode, nie ein Body (ADR-019 §3.7).
         console.warn(`JEV squad check: HTTP ${outcome.status}`);
       }
-      await finishCall(supabase, callId, resultClassFor(outcome), outcome.latencyMs);
+      await finishCall(supabase, callId, resultClassFor(outcome), outcome.latencyMs, finishToken);
       return FALLBACK;
     }
 
     const refs = ctx.candidates.map((c) => c.ref);
     const validation = validateJevAnswers(outcome.body, refs, config.minConfidence);
-    await finishCall(supabase, callId, validation.resultClass, outcome.latencyMs);
+    await finishCall(supabase, callId, validation.resultClass, outcome.latencyMs, finishToken);
     if (validation.resultClass === "invalid") return FALLBACK;
 
     return {

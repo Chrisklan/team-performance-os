@@ -69,6 +69,10 @@ export type JevCandidate = {
 };
 export type JevContext = {
   call_id: number | null;
+  // Punkt 87 (2026-09-29): pro Aufruf zufaelliges Token aus der Kontext-Tuer,
+  // von rpc_finish_model_call verlangt. Bleibt serverseitig (squadCheckActions.ts
+  // gibt es nie an den Browser weiter). Siehe backend/44_jev_rate_limit_and_finish_token.sql.
+  finish_token?: string;
   provider?: string;
   model?: string;
   rule_version?: string;

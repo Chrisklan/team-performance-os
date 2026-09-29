@@ -189,7 +189,7 @@ SELECT ok(NOT has_function_privilege('authenticated', 'app._module_flag_setters(
   'authenticated darf app._module_flag_setters nicht direkt ausfuehren');
 SELECT ok(NOT has_function_privilege('anon', 'public.rpc_squad_check_jev_context(uuid,smallint,smallint)', 'EXECUTE'),
   'Tuer rpc_squad_check_jev_context nicht fuer anon');
-SELECT ok(NOT has_function_privilege('anon', 'public.rpc_finish_model_call(bigint,text,integer)', 'EXECUTE'),
+SELECT ok(NOT has_function_privilege('anon', 'public.rpc_finish_model_call(bigint,text,integer,uuid)', 'EXECUTE'),
   'Tuer rpc_finish_model_call nicht fuer anon');
 SELECT ok(NOT has_function_privilege('authenticated', 'app.rpc_shred_person(uuid)', 'EXECUTE'),
   'rpc_shred_person bleibt ohne EXECUTE fuer authenticated (Punkt 55)');
@@ -325,8 +325,18 @@ SELECT is((SELECT (SELECT array_agg(e ->> 'ref' ORDER BY e ->> 'ref') FROM jsonb
   'refs uebersetzt genau die Pseudonyme der Kandidaten zurueck');
 
 -- Hash: dieselben Eingaben, anderes Zufallspseudonym -> derselbe Hash.
+-- Punkt 86 (2026-09-29, backend/44_jev_rate_limit_and_finish_token.sql): ein
+-- zweiter Aufruf mit identischem input_hash innerhalb von 5 Minuten wird jetzt
+-- gedrosselt (RATE_LIMITED). t41a's occurred_at wird dafuer kurz auf "vor 6
+-- Minuten" gesetzt, direkt danach wieder auf "jetzt" zurueckgesetzt, damit die
+-- Finish-Tests in Abschnitt 7 (5-Minuten-Fenster von rpc_finish_model_call)
+-- unveraendert gelten.
+UPDATE app.model_call_log SET occurred_at = now() - interval '6 minutes'
+ WHERE id = (SELECT (c ->> 'call_id')::bigint FROM t41a);
 CREATE TEMP TABLE t41b AS
   SELECT app.rpc_squad_check_jev_context('b1200000-0000-0000-0000-000000000001', 60::smallint, 6::smallint) AS c;
+UPDATE app.model_call_log SET occurred_at = now()
+ WHERE id = (SELECT (c ->> 'call_id')::bigint FROM t41a);
 SELECT is((SELECT count(*)::int FROM app.model_call_log WHERE team_id = 'b1000000-0000-0000-0000-000000000001'), 2,
   'zweiter Aufruf: genau eine weitere Protokollzeile');
 SELECT is((SELECT input_hash FROM app.model_call_log WHERE id = (SELECT (c ->> 'call_id')::bigint FROM t41b)),
@@ -374,31 +384,38 @@ SELECT is(array_length(app._t41_cand_people(app.rpc_squad_check_jev_context('b12
 -- -----------------------------------------------------------------------------
 -- 7. app.rpc_finish_model_call
 -- -----------------------------------------------------------------------------
+-- Punkt 87 (2026-09-29, backend/44_jev_rate_limit_and_finish_token.sql):
+-- rpc_finish_model_call braucht jetzt zusaetzlich das finish_token aus der
+-- Kontext-Tuer. Die bestehenden Tests hier pruefen weiterhin Person/Team/
+-- Status/Zeitfenster -- dafuer wird durchgehend das ECHTE Token der jeweiligen
+-- Zeile mitgegeben, damit ausschliesslich die urspruenglich gepruefte
+-- Bedingung ueber Erfolg/Ablehnung entscheidet. Ein FALSCHES Token wird
+-- separat in backend/44_jev_rate_limit_and_finish_token.pgtap.sql geprueft.
 SELECT app._t41_jwt('b1100000-0000-0000-0000-000000000003', 'athletic_coach');
-SELECT ok(app.is_denial(app.rpc_finish_model_call((SELECT (c ->> 'call_id')::bigint FROM t41a), 'ok', 120)),
+SELECT ok(app.is_denial(app.rpc_finish_model_call((SELECT (c ->> 'call_id')::bigint FROM t41a), 'ok', 120, (SELECT (c ->> 'finish_token')::uuid FROM t41a))),
   'fremde Person im selben Team: deny');
 SELECT app._t41_jwt('b1100000-0000-0000-0000-000000000008', 'coach', 'b1000000-0000-0000-0000-000000000008');
-SELECT ok(app.is_denial(app.rpc_finish_model_call((SELECT (c ->> 'call_id')::bigint FROM t41a), 'ok', 120)),
+SELECT ok(app.is_denial(app.rpc_finish_model_call((SELECT (c ->> 'call_id')::bigint FROM t41a), 'ok', 120, (SELECT (c ->> 'finish_token')::uuid FROM t41a))),
   'fremdes Team: deny');
 SELECT app._t41_jwt('b1100000-0000-0000-0000-000000000002', 'coach');
-SELECT throws_ok(format($$ SELECT app.rpc_finish_model_call(%s, 'pending', 1) $$, (SELECT c ->> 'call_id' FROM t41a)),
+SELECT throws_ok(format($$ SELECT app.rpc_finish_model_call(%s, 'pending', 1, %L) $$, (SELECT c ->> 'call_id' FROM t41a), (SELECT c ->> 'finish_token' FROM t41a)),
   '22023', NULL, 'result_class pending ist kein Abschluss: 22023');
-SELECT throws_ok(format($$ SELECT app.rpc_finish_model_call(%s, 'great', 1) $$, (SELECT c ->> 'call_id' FROM t41a)),
+SELECT throws_ok(format($$ SELECT app.rpc_finish_model_call(%s, 'great', 1, %L) $$, (SELECT c ->> 'call_id' FROM t41a), (SELECT c ->> 'finish_token' FROM t41a)),
   '22023', NULL, 'unbekannte result_class: 22023');
 SELECT is((SELECT result_class FROM app.model_call_log WHERE id = (SELECT (c ->> 'call_id')::bigint FROM t41a)), 'pending',
   'nach den Ablehnungen weiterhin pending');
-SELECT ok(NOT app.is_denial(app.rpc_finish_model_call((SELECT (c ->> 'call_id')::bigint FROM t41a), 'partial', 120)),
+SELECT ok(NOT app.is_denial(app.rpc_finish_model_call((SELECT (c ->> 'call_id')::bigint FROM t41a), 'partial', 120, (SELECT (c ->> 'finish_token')::uuid FROM t41a))),
   'eigene pending-Zeile: Abschluss erlaubt');
 SELECT is((SELECT row(result_class, latency_ms, finished_at IS NOT NULL)::text FROM app.model_call_log WHERE id = (SELECT (c ->> 'call_id')::bigint FROM t41a)),
   row('partial', 120, true)::text, 'result_class, latency_ms und finished_at gesetzt');
-SELECT ok(app.is_denial(app.rpc_finish_model_call((SELECT (c ->> 'call_id')::bigint FROM t41a), 'ok', 1)),
+SELECT ok(app.is_denial(app.rpc_finish_model_call((SELECT (c ->> 'call_id')::bigint FROM t41a), 'ok', 1, (SELECT (c ->> 'finish_token')::uuid FROM t41a))),
   'eine abgeschlossene Zeile ist nicht erneut aenderbar');
 UPDATE app.model_call_log SET occurred_at = now() - interval '6 minutes' WHERE id = (SELECT (c ->> 'call_id')::bigint FROM t41b);
-SELECT ok(app.is_denial(app.rpc_finish_model_call((SELECT (c ->> 'call_id')::bigint FROM t41b), 'timeout', 3000)),
+SELECT ok(app.is_denial(app.rpc_finish_model_call((SELECT (c ->> 'call_id')::bigint FROM t41b), 'timeout', 3000, (SELECT (c ->> 'finish_token')::uuid FROM t41b))),
   'aelter als 5 Minuten: deny');
 SELECT is((SELECT result_class FROM app.model_call_log WHERE id = (SELECT (c ->> 'call_id')::bigint FROM t41b)), 'pending',
   'die alte Zeile bleibt sichtbar pending');
-SELECT ok(app.is_denial(public.rpc_finish_model_call(-1, 'ok', 1)), 'Tuer: unbekannte id -> Ablehnungsobjekt');
+SELECT ok(app.is_denial(public.rpc_finish_model_call(-1, 'ok', 1, gen_random_uuid())), 'Tuer: unbekannte id -> Ablehnungsobjekt');
 SELECT is(current_setting('response.status', true), '403', 'Tuer setzt HTTP 403');
 
 -- -----------------------------------------------------------------------------
