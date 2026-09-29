@@ -16,7 +16,7 @@
 // Client-Pfad gelangt (Code-Review 2026-09-27). Der Grep-Test in
 // lib/ai/guardrails.test.ts bleibt als zweite Ebene.
 import "server-only";
-import type { JevRequest } from "@/lib/planung/jevSquadCheck";
+import type { JevRequest } from "@/lib/ai/jevTypes";
 
 export const OPENROUTER_DECISIONS_ENDPOINT = "https://openrouter.ai/api/alpha/decisions";
 

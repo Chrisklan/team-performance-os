@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { G01_MODEL_TEXT_BLACKLIST, g01Violations } from "./guardrails";
 import { JEV_CRITERIA, JEV_FOCUS, jevPromptTexts } from "@/lib/planung/jevSquadCheck";
+import { allowedGatewayRpcNames } from "./gateway/purposes";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 
@@ -28,6 +29,12 @@ describe("T3: kein service_role im Modellpfad", () => {
   it("findet die Dateien des Modellpfads", () => {
     const rel = files.map((f) => relative(ROOT, f));
     expect(rel).toContain("lib/ai/jev.ts");
+    // AP-70a: der Gateway-Kern liegt unter lib/ai/gateway und ist Teil des
+    // Modellpfads -- filesUnder(lib/ai) findet ihn bereits rekursiv mit,
+    // diese Zeile macht das explizit statt implizit.
+    expect(rel).toContain("lib/ai/gateway/run.ts");
+    expect(rel).toContain("lib/ai/gateway/db.ts");
+    expect(rel).toContain("lib/ai/gateway/purposes.ts");
     expect(rel).toContain("lib/planung/squadCheckActions.ts");
   });
 
@@ -35,7 +42,10 @@ describe("T3: kein service_role im Modellpfad", () => {
     for (const f of files) {
       const text = readFileSync(f, "utf8");
       expect(text, relative(ROOT, f)).not.toMatch(/SERVICE_ROLE|service_role|serviceRole/);
-      expect(text, relative(ROOT, f)).not.toMatch(/NEXT_PUBLIC_(OPENROUTER|JEV)/);
+      // L3 (Fixrunde): NEXT_PUBLIC_MODEL_GATEWAY ergaenzt -- die T3-Regex
+      // pruefte bisher nur die alten OPENROUTER/JEV-Praefixe, nicht den
+      // neuen Gateway-Namen (lib/ai/gateway/config.ts).
+      expect(text, relative(ROOT, f)).not.toMatch(/NEXT_PUBLIC_(OPENROUTER|JEV|MODEL_GATEWAY)/);
     }
   });
 
@@ -45,6 +55,31 @@ describe("T3: kein service_role im Modellpfad", () => {
       expect(text, relative(ROOT, f)).not.toMatch(/\.from\(\s*["'`]/);
       expect(text, relative(ROOT, f)).not.toMatch(/\bpg\b|postgres\(|createPool/);
     }
+  });
+
+  it("RPC-Namen im Gateway-Kern (lib/ai/gateway) sind Teilmenge der Registry aus purposes.ts", () => {
+    const allowed = allowedGatewayRpcNames();
+    expect(allowed.size).toBeGreaterThan(0);
+    const gatewayFiles = filesUnder(join(ROOT, "lib/ai/gateway")).filter((f) => !f.endsWith(".test.ts"));
+    const rpcCallPattern = /\.rpc\(\s*["'`]([^"'`]+)["'`]/g;
+    let sawAny = false;
+    for (const f of gatewayFiles) {
+      const text = readFileSync(f, "utf8");
+      for (const match of text.matchAll(rpcCallPattern)) {
+        sawAny = true;
+        expect(allowed.has(match[1]), `${relative(ROOT, f)}: RPC-Name "${match[1]}" nicht in der Registry`).toBe(true);
+      }
+    }
+    // Heutiger Stand: der Kern ruft die Namen ausschliesslich dynamisch
+    // (spec.openDoor / GATEWAY_FINISH_DOOR), kein Literal matcht -- dieser
+    // Test greift trotzdem sofort, sobald jemand einen Literal-Namen einfuehrt.
+    expect(sawAny).toBe(false);
+  });
+
+  it("die Registry selbst nennt genau die heute bekannten AP-69-Tueren", () => {
+    const allowed = allowedGatewayRpcNames();
+    expect(allowed.has("rpc_squad_check_jev_context")).toBe(true);
+    expect(allowed.has("rpc_finish_model_call")).toBe(true);
   });
 
   it("lib/ai wird aus keiner Client-Komponente importiert", () => {

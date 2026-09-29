@@ -92,11 +92,13 @@ export type JevOverlay = {
 export type JevRunStatus = "off" | "fallback" | "no_candidates" | "ok" | "partial";
 export type JevRunResult = { status: JevRunStatus; overlays: JevOverlay[] };
 
-// Ergebnisklassen in app.model_call_log (ohne pending).
+// Ergebnisklassen in app.model_call_log (ohne pending). "rejected" (AP-70a):
+// der Ausgangswaechter (lib/ai/gateway/run.ts) hat die Antwort verworfen.
 export type ModelCallResultClass =
   | "ok"
   | "partial"
   | "invalid"
   | "timeout"
   | "rate_limited"
-  | "http_error";
+  | "http_error"
+  | "rejected";

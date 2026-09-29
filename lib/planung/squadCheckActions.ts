@@ -7,38 +7,47 @@
 // Rolle und Team selbst (Muster D), diese Datei entscheidet keine Rechte.
 //
 // runJevSquadCheck ist die einzige Stelle, an der ein Modell aufgerufen wird.
-// Ablauf und Rueckfall (mit Chris abgestimmt):
+// Seit AP-70a laeuft der Ablauf ueber lib/ai/gateway/run.ts::runModelCall (der
+// gemeinsame Gateway-Kern), diese Funktion baut nur noch die AP-69-spezifische
+// ModelCallSpec. Beobachtbares Verhalten unveraendert gegenueber AP-69/Punkt 87
+// (siehe lib/planung/squadCheckActions.test.ts, Schritt-0-Charakterisierung):
 //   1. Betreiber-Notaus: JEV_ENABLED nicht "true" oder kein Key -> off.
-//   2. public.rpc_squad_check_jev_context (legt die pending-Protokollzeile an).
-//      Fehler, Ablehnung, 55000 -> fallback. Keine Kandidaten -> no_candidates.
-//      Punkt 87 Nachtrag (2026-09-29): die Tuer verlangt zusaetzlich das
-//      Server-Secret aus JEV_CONTEXT_SECRET (nie NEXT_PUBLIC_, nie an den
-//      Browser) -- ohne oder mit falschem Secret lehnt sie ab, BEVOR
-//      irgendeine Zeile entsteht (schliesst Phantom-Zeilen, siehe Kopfkommentar
-//      von supabase/migrations/20260929110000_jev_rate_limit_and_finish_token.sql).
+//   2. rpc_squad_check_jev_context (legt die pending-Protokollzeile an, ueber
+//      app._mg_open dahinter). Fehler, Ablehnung, 55000 -> fallback. Keine
+//      Kandidaten (call_id NULL) -> no_candidates (Gateway-Status "empty").
+//      Das Server-Secret (MODEL_GATEWAY_SECRET hat Vorrang, JEV_CONTEXT_SECRET
+//      bleibt der Uebergangs-Fallback bis zur Cloud-Umbenennung, siehe
+//      lib/ai/gateway/config.ts::readGatewaySwitchConfig -- Korrektur der
+//      vorherigen, umgekehrten Aussage hier, Fixrunde L2) reicht
+//      lib/ai/gateway/db.ts automatisch durch.
 //   3. Request nur aus den Kandidaten, Frage als Konstante (jevSquadCheck.ts).
 //   4. fetch mit Timeout, cache no-store, keine Wiederholung, keine Bodies im Log.
 //   5. Harte Pruefung je ref, Hinweis nur bei choice "reduced" und Konfidenz ab
 //      JEV_MIN_CONFIDENCE.
-//   6. public.rpc_finish_model_call, Fehler dort ignoriert (Zeile bleibt pending).
-//   7. Rueckgabe nur person_id/suggestion/hint_key/source, keine Konfidenz.
-//   8. Jeder Fehler in 2 bis 6 -> fallback, nie eine Exception bis zum Trainer.
+//   6. Ausgangswaechter (guard): overlaysFromRefs plus Schluesselpruefung --
+//      kann fuer AP-69 praktisch nie ablehnen (die Ausgabe besteht nur aus
+//      server-generierten Literalen/dem eigenen refs-Mapping), bleibt aber
+//      als gemeinsamer Baustein Pflicht (lib/ai/gateway/guard.ts).
+//   7. rpc_finish_model_call, Fehler dort ignoriert (Zeile bleibt pending).
+//   8. Rueckgabe nur person_id/suggestion/hint_key/source, keine Konfidenz.
+//   9. Jeder Fehler -> fallback, nie eine Exception bis zum Trainer.
 
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { classifyRpcError } from "@/lib/trainer/errors";
 import { isUuid } from "@/lib/medical/role";
-import { askJev, readJevConfig, type JevCallOutcome } from "@/lib/ai/jev";
+import { askJev, readJevConfig } from "@/lib/ai/jev";
+import { assertKeysSubset } from "@/lib/ai/gateway/guard";
+import { AP69_SQUAD_CHECK } from "@/lib/ai/gateway/purposes";
+import { runModelCall, type GatewayOpenPayload } from "@/lib/ai/gateway/run";
 import { buildJevRequest, overlaysFromRefs, validateJevAnswers } from "./jevSquadCheck";
-import type {
-  DismissableHintKey,
-  JevContext,
-  JevRunResult,
-  ModelCallResultClass,
-  SquadCheckPayload,
-} from "./types";
+import type { DismissableHintKey, JevContext, JevRunResult, SquadCheckPayload } from "./types";
 import { DISMISSABLE_HINT_KEYS } from "./types";
 
-type ServerClient = ReturnType<typeof createSupabaseServerClient>;
+// Das Modell, das app._mg_purpose_config('ap69_squad_check') fest vorgibt
+// (backend/47_model_gateway_core.sql). Ein abweichend konfiguriertes
+// JEV_MODEL wird nicht still benutzt (ADR-019 §3.2) -- config.model
+// ueberschreibt diesen Erwartungswert nur, wenn die Umgebungsvariable gesetzt ist.
+const AP69_PINNED_MODEL = "typesafe/jev-1.13";
 
 export type SquadCheckResult = { ok: true; payload: SquadCheckPayload } | { ok: false; message: string };
 export type HintActionResult = { ok: true } | { ok: false; message: string };
@@ -52,14 +61,6 @@ function validIntensity(value: number): boolean {
 }
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
-
-// Punkt 87 Nachtrag (2026-09-29): rein serverseitig gelesen, nie an den
-// Browser gereicht (runJevSquadCheck gibt nur status/overlays zurueck). Ohne
-// gesetztes Secret schlaegt die RPC ab -> fallback, wie jeder andere Fehler
-// in diesem Pfad (kein Sonderfall noetig, siehe Ablaufkommentar oben).
-function jevContextSecret(): string | null {
-  return process.env.JEV_CONTEXT_SECRET?.trim() || null;
-}
 
 function isDenial(value: unknown): boolean {
   return (
@@ -127,32 +128,11 @@ export async function restoreSessionHint(sessionId: string, personId: string, hi
   return hintCall("rpc_restore_session_hint", sessionId, personId, hintKey);
 }
 
-const FALLBACK: JevRunResult = { status: "fallback", overlays: [] };
-
-function resultClassFor(outcome: Exclude<JevCallOutcome, { kind: "ok" }>): ModelCallResultClass {
-  return outcome.kind;
-}
-
-async function finishCall(
-  supabase: ServerClient,
-  callId: number,
-  resultClass: ModelCallResultClass,
-  latencyMs: number | null,
-  finishToken: string,
-): Promise<void> {
-  try {
-    await supabase.rpc("rpc_finish_model_call", {
-      p_call_id: callId,
-      p_result_class: resultClass,
-      p_latency_ms: latencyMs === null ? null : Math.max(0, Math.round(latencyMs)),
-      // Punkt 87 (2026-09-29): ohne das aus rpc_squad_check_jev_context
-      // stammende Token lehnt die Tuer den Abschluss ab (deny).
-      p_finish_token: finishToken,
-    });
-  } catch {
-    // Bewusst ignoriert: die Protokollzeile bleibt pending sichtbar.
-  }
-}
+// AP-69-Kandidatenfelder, die guard() als "vom Tuer-Payload selbst
+// stammend" akzeptiert -- person_id/suggestion/hint_key/source sind
+// server-generierte Literale bzw. das eigene refs-Mapping, nie ein vom
+// Modell frei erfundenes Feld. Siehe lib/ai/gateway/guard.ts::assertKeysSubset.
+const AP69_OVERLAY_KEY_ALLOWLIST = ["person_id", "suggestion", "hint_key", "source"] as const;
 
 export async function runJevSquadCheck(
   sessionId: string,
@@ -160,75 +140,55 @@ export async function runJevSquadCheck(
   intensity: number,
 ): Promise<JevRunResult> {
   const config = readJevConfig();
-  if (!config.enabled || config.apiKey === null || config.provider !== "openrouter") {
-    return { status: "off", overlays: [] };
-  }
   if (!isUuid(sessionId) || !validDuration(durationMin) || !validIntensity(intensity)) {
-    return FALLBACK;
+    return { status: "fallback", overlays: [] };
   }
 
-  let supabase: ServerClient;
-  let ctx: JevContext;
-  try {
-    supabase = createSupabaseServerClient();
-    const { data, error } = await supabase.rpc("rpc_squad_check_jev_context", {
+  // AP-70a Code-Review P1 (Fixrunde): ModelCallSpec ist jetzt ueber
+  // PurposeTypeMap[P] an purpose gebunden (lib/ai/gateway/purposes.ts), die
+  // vier Generics werden aus purpose: AP69_SQUAD_CHECK abgeleitet, kein
+  // expliziter Typ-Aufruf mehr noetig -- ein falsch verdrahtetes Feld unten
+  // ist jetzt ein Typfehler statt klaglos durchzukompilieren.
+  const result = await runModelCall({
+    purpose: AP69_SQUAD_CHECK,
+    model: config.model ?? AP69_PINNED_MODEL,
+    emptyOutput: [],
+    fallbackOutput: [],
+    apiKey: config.provider === "openrouter" ? config.apiKey : null,
+    timeoutMs: config.timeoutMs,
+    openArgs: {
       p_session_id: sessionId,
       p_duration_min: durationMin,
       p_planned_intensity: intensity,
-      p_context_secret: jevContextSecret(),
-    });
-    if (error || !data || isDenial(data)) return FALLBACK;
-    ctx = data as JevContext;
-  } catch {
-    return FALLBACK;
-  }
-
-  if (ctx.call_id === null || ctx.call_id === undefined || !Array.isArray(ctx.candidates) || ctx.candidates.length === 0) {
-    return { status: "no_candidates", overlays: [] };
-  }
-  const callId = ctx.call_id;
-  // Punkt 87 (2026-09-29): ohne Token kann kein Abschluss verifiziert werden,
-  // die Zeile bleibt bewusst pending statt einen Abschluss ohne Nachweis zu riskieren.
-  const finishToken = typeof ctx.finish_token === "string" ? ctx.finish_token : null;
-  if (!finishToken) {
-    return FALLBACK;
-  }
-
-  try {
-    // Das Modell kommt aus der Tuer (dort protokolliert, festgeschrieben). Ein
-    // abweichend konfiguriertes JEV_MODEL wird nicht still benutzt.
-    const model = typeof ctx.model === "string" ? ctx.model : null;
-    if (!model || (config.model !== null && config.model !== model)) {
-      await finishCall(supabase, callId, "invalid", null, finishToken);
-      return FALLBACK;
-    }
-
-    const request = buildJevRequest(ctx);
-    if (!request) {
-      await finishCall(supabase, callId, "invalid", null, finishToken);
-      return FALLBACK;
-    }
-
-    const outcome = await askJev(request, { model, apiKey: config.apiKey, timeoutMs: config.timeoutMs });
-    if (outcome.kind !== "ok") {
+    },
+    toCtx: (openPayload: GatewayOpenPayload) => openPayload as unknown as JevContext,
+    buildRequest: (ctx) => buildJevRequest(ctx),
+    callProvider: (request, opts) => askJev(request, opts),
+    parse: (body, ctx) => {
+      const refs = ctx.candidates.map((c) => c.ref);
+      const validation = validateJevAnswers(body, refs, config.minConfidence);
+      return { resultClass: validation.resultClass, parsed: validation };
+    },
+    guard: (validation, ctx) => {
+      const overlays = overlaysFromRefs(validation.reducedRefs, ctx.refs);
+      // Pflicht-Ausgangswaechter (AP-70a): overlays bestehen nur aus
+      // person_id (eigenes refs-Mapping) und den drei server-generierten
+      // Literalen suggestion/hint_key/source -- assertKeysSubset ist damit
+      // fuer AP-69 immer erfuellt, bleibt aber als gemeinsamer Baustein aktiv.
+      if (!assertKeysSubset(overlays, ctx.refs, AP69_OVERLAY_KEY_ALLOWLIST)) {
+        return { ok: false };
+      }
+      return { ok: true, output: overlays };
+    },
+    onProviderError: (outcome) => {
       if (outcome.kind === "http_error" || outcome.kind === "rate_limited") {
         // Nur der Statuscode, nie ein Body (ADR-019 §3.7).
         console.warn(`JEV squad check: HTTP ${outcome.status}`);
       }
-      await finishCall(supabase, callId, resultClassFor(outcome), outcome.latencyMs, finishToken);
-      return FALLBACK;
-    }
+    },
+  });
 
-    const refs = ctx.candidates.map((c) => c.ref);
-    const validation = validateJevAnswers(outcome.body, refs, config.minConfidence);
-    await finishCall(supabase, callId, validation.resultClass, outcome.latencyMs, finishToken);
-    if (validation.resultClass === "invalid") return FALLBACK;
-
-    return {
-      status: validation.resultClass === "ok" ? "ok" : "partial",
-      overlays: overlaysFromRefs(validation.reducedRefs, ctx.refs),
-    };
-  } catch {
-    return FALLBACK;
-  }
+  const status: JevRunResult["status"] =
+    result.status === "empty" ? "no_candidates" : result.status === "rejected" ? "fallback" : result.status;
+  return { status, overlays: result.output };
 }

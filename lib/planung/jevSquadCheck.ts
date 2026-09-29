@@ -27,6 +27,9 @@ import type {
   ModelCallResultClass,
   SquadAthlete,
 } from "./types";
+// AP-70a: JevRequest/JevQuestion sind generische Wire-Typen des Gateway-Kerns,
+// die Domaene (hier) fuellt sie, importiert sie aber nicht mehr selbst.
+import type { JevQuestion, JevRequest } from "@/lib/ai/jevTypes";
 
 export const JEV_CHOICES = ["full", "reduced", "unclear"] as const;
 export type JevChoice = (typeof JEV_CHOICES)[number];
@@ -72,20 +75,6 @@ export function jevPromptTexts(sampleRef = "A01"): string[] {
     ...Object.values(JEV_CRITERIA).flatMap((c) => [c.what, c.not_for]),
   ];
 }
-
-export type JevQuestion = {
-  type: "choice";
-  instructions: { question: string; inspect: string; focus: string };
-  criteria: Record<JevChoice, { what: string; not_for: string }>;
-};
-
-export type JevRequest = {
-  state: {
-    session: { duration_min: number; planned_intensity: number; session_type: string };
-    athletes: JevCandidate[];
-  };
-  questions: Record<string, JevQuestion>;
-};
 
 function pickCandidate(c: JevCandidate): JevCandidate {
   return {
