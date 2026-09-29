@@ -8,6 +8,7 @@ import Link from "next/link";
 import { KaderGrid } from "@/components/trainer/KaderGrid";
 import { KaderStateScreen } from "@/components/trainer/KaderStateScreen";
 import { SignOutButton } from "@/components/trainer/SignOutButton";
+import { TrainerQueryPanel } from "@/components/trainer/TrainerQueryPanel";
 import { PasswordLink } from "@/components/account/PasswordLink";
 import {
   KaderAccessError,
@@ -78,6 +79,8 @@ export default async function TrainerDashboardPage() {
           <SignOutButton />
         </div>
       </header>
+
+      <TrainerQueryPanel />
 
       <KaderGrid members={members} />
     </main>
