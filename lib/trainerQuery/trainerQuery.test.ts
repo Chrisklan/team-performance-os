@@ -21,7 +21,7 @@ import {
 import { buildPlayerRefs, positionCategory, resolvePlayerRefs } from "./resolve";
 import { evaluateTrainerQuery, parseTrainerQueryAnswers, type ParsedTrainerQueryAnswers } from "./evaluate";
 import { buildTrainerQueryRequest } from "./spec";
-import { renderTrainerQueryAnswer } from "./render";
+import { renderTrainerQueryAnswer, resolveFailureAnswer } from "./render";
 import type { CoachKaderPayload } from "@/lib/trainer/types";
 
 function payload(): CoachKaderPayload {
@@ -199,6 +199,56 @@ describe("resolve.ts: Pseudonymisierung (C1, fail-closed)", () => {
     const result = resolvePlayerRefs("Ist Mustermann heute frei?", p);
     expect(result).toEqual({ ok: false, reason: "ambiguous_name" });
     expect(result).not.toHaveProperty("pseudonymizedQuestion");
+  });
+
+  // Punkt 103 (Security-Review, dokumentiertes Restrisiko, KEIN Fix): ein
+  // echter, aber NICHT im aktuellen Kader-Payload enthaltener Kurzname (Gast,
+  // Vertretung) kann mit einem Wort aus ALLOWED_SHORT_VOCAB kollidieren und
+  // wird dann als "erlaubtes Funktionswort" durchgelassen statt blockiert.
+  // Kein Fix moeglich, ohne echte Funktionswoerter mitzublockieren -- dieser
+  // Test haelt das Verhalten sichtbar fest (siehe Kommentar bei
+  // ALLOWED_SHORT_VOCAB in resolve.ts).
+  it("Punkt 103: ein Kurzname ausserhalb des aktuellen Kaders kollidiert mit ALLOWED_SHORT_VOCAB (Restrisiko, kein Fix)", () => {
+    // "Ab" ist in KEINEM Namen dieses Payloads enthalten -- ein hypothetischer
+    // Gastspieler "Ab" ist dem aktuellen Kader unbekannt.
+    const result = resolvePlayerRefs("Ist ab heute frei?", payload());
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // "ab" wird nicht blockiert, sondern als erlaubtes Funktionswort behandelt
+    // -- kein P-Ref, kein mentionedRef, obwohl der Wortlaut identisch mit
+    // einem moeglichen Kurznamen waere.
+    expect(result.mentionedRefs).toHaveLength(0);
+  });
+
+  // Punkt 103, Gegenprobe (kein Regressionsrisiko bei der Fail-Closed-Garantie):
+  // ist der kollidierende Kurzname TATSAECHLICH im aktuellen Kader-Payload
+  // enthalten, greift der Namensindex VOR dem Kurzwort-Scan -- der Name wird
+  // weiterhin korrekt zu einem P-Ref und geht nie als Klartext ans Modell.
+  it("Punkt 103: ein echter 2-Zeichen-Kadername wird weiterhin korrekt erkannt, auch wenn er wie ein ALLOWED_SHORT_VOCAB-Wort aussieht", () => {
+    const p = payload();
+    p.members[0].player.name = "Jan Ab";
+    const result = resolvePlayerRefs("Ist Ab heute frei?", p);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.pseudonymizedQuestion).not.toMatch(/\bAb\b/);
+    expect(result.mentionedRefs).toHaveLength(1);
+    expect(result.mentionedRefs[0].name).toBe("Jan Ab");
+  });
+
+  // Punkt 104 (Security-Review, dokumentiertes Verhalten, KEIN Fix): heisst
+  // ein Spieler wie ein erlaubtes Funktionswort, hat die Namensauflösung
+  // bewusst Vorrang -- das Wort wird als P-Ref aufgeloest statt als
+  // Funktionswort behandelt, auch wenn es in der Frage funktionswoertlich
+  // gemeint war. Sachlich falsche, aber nicht datenschutzrelevante Antwort
+  // (siehe Kommentar in resolve.ts::resolvePlayerRefs).
+  it("Punkt 104: Namensauflösung hat Vorrang vor Funktionswort-Erkennung bei kollidierendem Nachnamen", () => {
+    const p = payload();
+    p.members[0].player.name = "Peter Zu";
+    const result = resolvePlayerRefs("Ist zu heute frei?", p);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.mentionedRefs).toHaveLength(1);
+    expect(result.mentionedRefs[0].name).toBe("Peter Zu");
   });
 
   it("P-Refs sind stabil geformt (P + Ziffern, Mindestbreite 2)", () => {
@@ -410,5 +460,36 @@ describe("render.ts: feste Vorlagen", () => {
   it("unsupported liefert keine Zeilen mit Spielerdaten", () => {
     const view = renderTrainerQueryAnswer({ kind: "unsupported", reason: "detail_out_of_scope" });
     expect(view.lines.join(" ")).not.toMatch(/Mustermann/);
+  });
+});
+
+// Punkt 105 (Security-Review): ambiguous_name und unresolved_token zeigten
+// vorher identisch UNSUPPORTED_INPUT_ANSWER ("keine Zeitraeume oder
+// Verlaeufe"), was fuer beide Faelle inhaltlich falsch war. Jeder Grund
+// bekommt jetzt einen eigenen, zutreffenden Text -- getestet ueber die
+// exportierte reine Zuordnungsfunktion, ohne den kompletten
+// askTrainerQuery-Gateway-Pfad zu mocken.
+describe("render.ts: resolveFailureAnswer (Punkt 105)", () => {
+  it("ambiguous_name: generischer Hinweis auf Mehrdeutigkeit, ohne Namen zu nennen", () => {
+    const view = resolveFailureAnswer("ambiguous_name");
+    expect(view.label).toBe("KI-Antwort");
+    expect(view.lines.join(" ")).toMatch(/eindeutig/);
+    expect(view.lines.join(" ")).not.toMatch(/Mustermann|Müller|Mueller/);
+    // Der alte, fuer beide Faelle falsche Zeitraum-Text darf hier nicht mehr
+    // auftauchen.
+    expect(view.lines.join(" ")).not.toMatch(/Zeitraeume|Verlaeufe/);
+  });
+
+  it("unresolved_token: Hinweis auf nicht unterstuetztes Wort/Format, nicht auf Zeitraeume", () => {
+    const view = resolveFailureAnswer("unresolved_token");
+    expect(view.label).toBe("KI-Antwort");
+    expect(view.lines.join(" ")).toMatch(/nicht unterstuetzt/);
+    expect(view.lines.join(" ")).not.toMatch(/Zeitraeume|Verlaeufe/);
+  });
+
+  it("ambiguous_name und unresolved_token liefern unterschiedliche Texte", () => {
+    const ambiguous = resolveFailureAnswer("ambiguous_name");
+    const unresolved = resolveFailureAnswer("unresolved_token");
+    expect(ambiguous.lines).not.toEqual(unresolved.lines);
   });
 });

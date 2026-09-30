@@ -90,6 +90,15 @@ describe("T3: kein service_role im Modellpfad", () => {
   // gegen die Registry -- ein kuenftiger direkter supabase.rpc(...)-Aufruf in
   // lib/trainerQuery (statt ueber gatewayDb(...).readDoor) waere sonst von
   // keinem Test bemerkt worden.
+  // Punkt 106 (Security-Review, N-3-Rest-Nachtrag): dieser reine
+  // Literalscan (.rpc("name")) erkennt keinen .rpc(nameVar)-Aufruf mit einer
+  // Variable statt einem String-Literal -- eine solche Umgehung wuerde durch
+  // diesen Test allein nicht auffallen. Er bleibt trotzdem als zusaetzliche
+  // Verteidigungslinie bestehen (faengt den haeufigsten Fall sofort und mit
+  // genauer Fundstelle), die eigentliche Garantie kommt aber jetzt aus dem
+  // Import-Verbot direkt darunter: ohne JEDEN Supabase-Import ist in
+  // lib/trainerQuery ueberhaupt kein Client vorhanden, an dem sich .rpc(...)
+  // -- ob mit Literal oder Variable -- aufrufen liesse.
   it("RPC-Namen in lib/trainerQuery sind Teilmenge der Registry aus purposes.ts", () => {
     const allowed = allowedGatewayRpcNames();
     const trainerQueryFiles = filesUnder(join(ROOT, "lib/trainerQuery")).filter((f) => !f.endsWith(".test.ts"));
@@ -107,14 +116,21 @@ describe("T3: kein service_role im Modellpfad", () => {
     expect(sawAny).toBe(false);
   });
 
-  // N-3-Rest: createSupabaseServerClient ist in lib/trainerQuery komplett
-  // untersagt, nicht nur .rpc()-Literale -- ein direkter Admin-/Server-Client
-  // wuerde den Gateway-Kern (samt Pseudonymisierung/Registry-Scan) umgehen.
-  it("createSupabaseServerClient wird in lib/trainerQuery nicht importiert", () => {
+  // N-3-Rest / Punkt 106 (Security-Review): vorher war nur der eine
+  // Funktionsname createSupabaseServerClient verboten -- ein
+  // createSupabaseBrowserClient-Import oder ein direkter
+  // @supabase/supabase-js-createClient-Import waeren durchgerutscht. Jetzt
+  // ist JEDER Import aus @/lib/supabase/* und @supabase/* in lib/trainerQuery
+  // untersagt, nicht nur der eine Funktionsname -- ein direkter
+  // Admin-/Server-/Browser-Client wuerde den Gateway-Kern (samt
+  // Pseudonymisierung/Registry-Scan) umgehen, unabhaengig davon, welche
+  // konkrete Supabase-Funktion er importiert.
+  it("kein Supabase-Import (@/lib/supabase/* oder @supabase/*) in lib/trainerQuery", () => {
     const trainerQueryFiles = filesUnder(join(ROOT, "lib/trainerQuery")).filter((f) => !f.endsWith(".test.ts"));
+    const importPattern = /from\s+["'](@\/lib\/supabase\/|@supabase\/)/;
     for (const f of trainerQueryFiles) {
       const text = readFileSync(f, "utf8");
-      expect(text, relative(ROOT, f)).not.toMatch(/createSupabaseServerClient/);
+      expect(text, relative(ROOT, f)).not.toMatch(importPattern);
     }
   });
 

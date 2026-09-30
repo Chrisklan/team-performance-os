@@ -29,7 +29,7 @@ import { gatewayDb } from "@/lib/ai/gateway/db";
 import { AP70_TRAINER_QUERY } from "@/lib/ai/gateway/purposes";
 import { buildTrainerQuerySpec } from "./spec";
 import { resolvePlayerRefs } from "./resolve";
-import { renderTrainerQueryAnswer, type TrainerQueryAnswerView } from "./render";
+import { renderTrainerQueryAnswer, resolveFailureAnswer, type TrainerQueryAnswerView } from "./render";
 import type { CoachKaderPayload } from "@/lib/trainer/types";
 import { createHash } from "node:crypto";
 
@@ -107,7 +107,10 @@ export async function askTrainerQuery(question: string): Promise<TrainerQueryRes
     // C1 (Security-Review): fail-closed -- ein unerkanntes Wort bleibt nach der
     // Pseudonymisierung uebrig, KEIN Modellaufruf, KEIN stiller Fallback auf
     // "player_ref: keine" (der versehentlich alle Spieler aufgelistet haette).
-    return { ok: true, answer: UNSUPPORTED_INPUT_ANSWER };
+    // Punkt 105: die Absage passt jetzt zum tatsaechlichen Grund
+    // (ambiguous_name/unresolved_token), statt beide auf den Zeitraum-Text
+    // UNSUPPORTED_INPUT_ANSWER abzubilden.
+    return { ok: true, answer: resolveFailureAnswer(resolved.reason) };
   }
   const { pseudonymizedQuestion, refs, mentionedRefs } = resolved;
 

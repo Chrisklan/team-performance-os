@@ -143,6 +143,17 @@ const ALLOWED_VOCAB = new Set(
 // Funktionswort" durchgelassen statt zu blockieren -- ein echter, wenn auch
 // seltener Klartext-Leckpfad. Nur die wenig namensartigen Praepositionen/
 // Funktionswoerter bleiben in der Liste.
+//
+// Security-Review-Nachtrag (Punkt 103): fuer einen Namensbestandteil eines
+// AKTUELLEN Kadermitglieds greift dieses Risiko nicht -- resolvePlayerRefs
+// prueft namePartIndex (aus dem aktuellen payload/refs gebaut) VOR diesem
+// Kurzwort-Scan, ein echter Kadername wird also immer schon vorher zum P-Ref.
+// Das verbleibende Restrisiko ist ausschliesslich der Fall eines echten,
+// NICHT im aktuellen Kader-Payload enthaltenen Kurznamens (Gast, Vertretung,
+// teamfremde Person) -- die Funktion kennt ausserhalb des aktuellen Kaders
+// keine Namen und kann diesen Fall strukturell nicht schliessen, ohne echte
+// Funktionswoerter mitzublockieren. Bewusst akzeptiertes Restrisiko, siehe
+// Regressionstest "Punkt 103" in trainerQuery.test.ts.
 const ALLOWED_SHORT_VOCAB = new Set(["zu", "ab", "am", "in", "ob", "wo"].map(normalizeToken));
 
 const AMBIGUOUS_MARKER = "jemand";
@@ -249,6 +260,19 @@ export function resolvePlayerRefs(question: string, payload: CoachKaderPayloadLi
     // ("Li", "Wu", "Oh") ueberhaupt gegen den Namensindex geprueft werden.
     if (norm.length < 2) return match;
 
+    // Punkt 104 (Security-Review): Namensauflösung hat hier BEWUSST Vorrang
+    // vor der Funktionswort-Erkennung (ALLOWED_VOCAB/ALLOWED_SHORT_VOCAB
+    // weiter unten) -- der Namensindex wird zuerst geprueft, ein Token, das
+    // sowohl ein Namensbestandteil eines aktuellen Kadermitglieds als auch ein
+    // Funktionswort/eine Praeposition ist (z.B. Nachname "Im" oder "Zu"), wird
+    // deshalb immer als P-Ref aufgeloest, nie als Funktionswort durchgelassen.
+    // Das ist die sicherere Richtung: ein echter Spielername geht dadurch nie
+    // unveraendert als Klartext ans Modell. Das Risiko liegt nur in der
+    // umgekehrten, harmlosen Richtung -- ein Funktionswort wird faelschlich
+    // als Namensnennung behandelt und liefert eine sachlich falsche, aber
+    // nicht datenschutzrelevante Antwort (der Trainer ist ohnehin fuer alle
+    // Kaderdaten berechtigt). Bewusst akzeptiertes, dokumentiertes Verhalten,
+    // siehe Regressionstest "Punkt 104" in trainerQuery.test.ts.
     const owners = namePartIndex.get(norm);
     if (!owners || owners.length === 0) return match;
     if (owners.length === 1) {
