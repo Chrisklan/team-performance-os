@@ -24,13 +24,22 @@
 --   - app.rpc_finish_model_call verlangt weiterhin das korrekte finish_token.
 --     Ein falsches oder fehlendes Token -> deny (42501), das korrekte Token
 --     schliesst die Zeile ab wie zuvor.
+-- Punkt 94 (Haertung): die Secret-Infrastruktur heisst inzwischen
+--   app.model_gateway_secret (AP-70a-Umbenennung, backend/47_model_gateway_core.sql),
+--   nicht mehr app.jev_context_secret -- diese Tabelle existiert in diesem
+--   Repo-Stand nicht mehr. app.rpc_set_jev_context_secret ist ein reiner
+--   Kompatibilitaets-Wrapper um app.rpc_set_model_gateway_secret. Ergaenzt:
+--   - bei komplett leerer Secret-Tabelle wird JEDES p_context_secret
+--     abgelehnt (deny, 42501), BEVOR eine Zeile in model_call_log entsteht.
+--   - authenticated/anon duerfen weder app.model_gateway_secret lesen noch
+--     app.rpc_set_jev_context_secret ausfuehren (nur service_role).
 --
 -- Laeuft in einer Transaktion und rollt zurueck.
 -- =============================================================================
 
 BEGIN;
 SET search_path = public, pgtap;
-SELECT plan(10);
+SELECT plan(17);
 
 INSERT INTO app.teams (id, name, timezone) VALUES
   ('c4400000-0000-0000-0000-000000000001','Team C44','Europe/Berlin');
@@ -77,6 +86,37 @@ VALUES ('c4400000-0000-0000-0000-000000000001','c4400000-0000-0000-0000-00000000
 
 SELECT app._t44_jwt('c4400000-0000-0000-0000-000000000005', 'admin');
 SELECT app.rpc_set_module_flag('jev_squad_check_enabled', true);
+
+-- -----------------------------------------------------------------------------
+-- Punkt 94: "Secret-Tabelle komplett leer" fuehrt zu Absage, BEVOR eine Zeile
+-- entsteht. Muss VOR dem Secret-Setup unten stehen -- die frische Transaktion
+-- hat app.model_gateway_secret zu diesem Zeitpunkt noch nicht befuellt.
+-- -----------------------------------------------------------------------------
+
+SELECT is(
+  (SELECT count(*)::int FROM app.model_gateway_secret),
+  0,
+  'Punkt 94: app.model_gateway_secret ist zu Beginn der Transaktion komplett leer'
+);
+
+SELECT app._t44_jwt('c4400000-0000-0000-0000-000000000002', 'coach');
+
+SELECT is(
+  (app.rpc_squad_check_jev_context(
+    'c4400000-0000-0000-0000-0000000000a1'::uuid, 60::smallint, 6::smallint,
+    'sieht-korrekt-aus-aber-tabelle-ist-leer'
+  ) ->> 'code'),
+  '42501',
+  'Punkt 94: bei leerer Secret-Tabelle wird JEDES p_context_secret abgelehnt (deny wie bei falschem Secret)'
+);
+
+SELECT is(
+  (SELECT count(*)::int FROM app.model_call_log WHERE team_id = 'c4400000-0000-0000-0000-000000000001'),
+  0,
+  'Punkt 94: der abgelehnte Aufruf bei leerer Secret-Tabelle hat KEINE Phantom-Zeile in model_call_log angelegt'
+);
+
+SELECT app._t44_jwt('c4400000-0000-0000-0000-000000000005', 'admin');
 
 -- Punkt 87 Nachtrag: Server-Secret hinterlegen (Ops-Setup, ausserhalb des
 -- Anfragepfads -- app.rpc_set_jev_context_secret laeuft hier als Superuser,
@@ -216,6 +256,32 @@ SELECT is(
   (SELECT result_class FROM app.model_call_log WHERE id = (SELECT id FROM t44_last_call)),
   'ok',
   'Punkt 87: die Zeile ist in der Datenbank tatsaechlich auf ok abgeschlossen'
+);
+
+-- -----------------------------------------------------------------------------
+-- Punkt 94: Privilegien-Asserts fuer authenticated/anon auf der
+-- Secret-Infrastruktur (app.model_gateway_secret, Nachfolger von
+-- app.jev_context_secret, siehe backend/47_model_gateway_core.sql).
+-- -----------------------------------------------------------------------------
+
+SELECT ok(
+  NOT has_table_privilege('authenticated', 'app.model_gateway_secret', 'SELECT'),
+  'Punkt 94: authenticated darf app.model_gateway_secret NICHT lesen'
+);
+
+SELECT ok(
+  NOT has_table_privilege('anon', 'app.model_gateway_secret', 'SELECT'),
+  'Punkt 94: anon darf app.model_gateway_secret NICHT lesen'
+);
+
+SELECT ok(
+  NOT has_function_privilege('authenticated', 'app.rpc_set_jev_context_secret(text)', 'EXECUTE'),
+  'Punkt 94: authenticated darf app.rpc_set_jev_context_secret NICHT ausfuehren'
+);
+
+SELECT ok(
+  NOT has_function_privilege('anon', 'app.rpc_set_jev_context_secret(text)', 'EXECUTE'),
+  'Punkt 94: anon darf app.rpc_set_jev_context_secret NICHT ausfuehren'
 );
 
 SELECT * FROM finish();

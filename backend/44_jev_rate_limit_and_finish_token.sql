@@ -446,7 +446,7 @@ COMMENT ON FUNCTION app.rpc_squad_check_jev_context(uuid, smallint, smallint, te
   'c_rate_limit_max_calls Aufrufen pro Team UND Person innerhalb c_rate_limit_window, '
   'serialisiert per pg_advisory_xact_lock. duration_min/planned_intensity kommen aus der '
   'gespeicherten Session, nicht mehr aus p_duration_min/p_planned_intensity (Client-Werte '
-  'werden nur noch fuer die NOT_FOUND/session_id-Pruefung indirekt gebraucht, sonst ignoriert). '
+  'werden komplett ignoriert). '
   'Punkt 87 (Nachtrag 2026-09-29): p_context_secret muss gegen app.jev_context_secret passen '
   '(sonst FORBIDDEN, BEVOR irgendeine Zeile entsteht), gibt zusaetzlich finish_token zurueck, '
   'das app.rpc_finish_model_call verifiziert. Siehe backend/44_jev_rate_limit_and_finish_token.sql.';
