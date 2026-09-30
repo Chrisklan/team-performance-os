@@ -447,9 +447,11 @@ COMMENT ON FUNCTION app.rpc_squad_check_jev_context(uuid, smallint, smallint, te
   'serialisiert per pg_advisory_xact_lock. duration_min/planned_intensity kommen aus der '
   'gespeicherten Session, nicht mehr aus p_duration_min/p_planned_intensity (Client-Werte '
   'werden komplett ignoriert). '
-  'Punkt 87 (Nachtrag 2026-09-29): p_context_secret muss gegen app.jev_context_secret passen '
+  'Punkt 87 (Nachtrag 2026-09-29): p_context_secret muss gegen app.model_gateway_secret passen '
   '(sonst FORBIDDEN, BEVOR irgendeine Zeile entsteht), gibt zusaetzlich finish_token zurueck, '
-  'das app.rpc_finish_model_call verifiziert. Siehe backend/44_jev_rate_limit_and_finish_token.sql.';
+  'das app.rpc_finish_model_call verifiziert. Zum Zeitpunkt von Punkt 87 hiess diese Tabelle '
+  'noch app.jev_context_secret, seit AP-70a (backend/47_model_gateway_core.sql) umbenannt/ersetzt; '
+  'backend/47 droppt app.jev_context_secret am Ende. Siehe backend/44_jev_rate_limit_and_finish_token.sql.';
 
 REVOKE EXECUTE ON FUNCTION app.rpc_squad_check_jev_context(uuid, smallint, smallint, text) FROM PUBLIC, anon;
 GRANT  EXECUTE ON FUNCTION app.rpc_squad_check_jev_context(uuid, smallint, smallint, text) TO authenticated;
