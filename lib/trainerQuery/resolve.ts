@@ -10,15 +10,18 @@
 // Tippfehler -- ein Klarname konnte unveraendert an OpenRouter gehen. Diese
 // Fassung ist FAIL-CLOSED statt best-effort:
 //   1. Tokenisiert die Frage in Buchstaben-/Ziffernlaeufe (Unicode-aware),
-//      ersetzt jeden Namensbestandteil (Vor-/Nachname einzeln, ab Laenge 3,
+//      ersetzt jeden Namensbestandteil (Vor-/Nachname einzeln, ab Laenge 2,
 //      NFKC+lowercase+Umlaut-Transliteration auf BEIDEN Seiten normalisiert --
 //      kein reiner Teilstring-Match mehr, "Ali" trifft nicht mehr "Qualität").
 //   2. Ersetzt Rueckennummern als eigenstaendiges Zahl-Token.
-//   3. Scannt danach JEDEN verbleibenden Buchstaben-Token (Laenge > 2) gegen
-//      eine feste, geschlossene Vokabelliste (deutsche Frage-Woerter plus die
-//      eigenen Domaenenbegriffe). Ein einziges unbekanntes Wort blockiert die
-//      GESAMTE Anfrage OHNE Modellaufruf -- kein stiller Fallback auf
-//      "player_ref: keine", der versehentlich alle Spieler auflisten wuerde.
+//   3. Scannt danach JEDEN verbleibenden Buchstaben-Token gegen eine feste,
+//      geschlossene Vokabelliste (deutsche Frage-Woerter plus die eigenen
+//      Domaenenbegriffe). 2-Zeichen-Tokens werden zusaetzlich gegen eine
+//      eigene, bewusst kleine Kurzwortliste geprueft (ALLOWED_SHORT_VOCAB);
+//      alles darunter (1-Zeichen-Tokens) ist grundsaetzlich blockiert. Ein
+//      einziges unbekanntes Wort blockiert die GESAMTE Anfrage OHNE
+//      Modellaufruf -- kein stiller Fallback auf "player_ref: keine", der
+//      versehentlich alle Spieler auflisten wuerde.
 
 import { randomInt } from "node:crypto";
 
@@ -49,11 +52,32 @@ type CoachKaderPayloadLike = {
 export const POSITION_CATEGORIES = ["torwart", "abwehr", "mittelfeld", "sturm", "unbekannt"] as const;
 export type PositionCategory = (typeof POSITION_CATEGORIES)[number];
 
+// N-3 (Security-Re-Review): die Kuerzel ("iv", "av", "om", "dm", "tor") duerfen
+// nur als EIGENSTAENDIGES Token greifen, nicht als Teilstring -- sonst wird
+// z.B. "Torjaeger" (enthaelt "tor" als Teilstring) faelschlich zu "torwart".
+// Die laengeren, eindeutigen Woerter (abwehr/verteidig/mittelfeld/sturm/
+// stuerm/angriff) bleiben bewusst Teilstring-Suche: sie sind lang genug, dass
+// kein realistisches deutsches Wort sie unbeabsichtigt als Teilstring traegt,
+// waehrend die zwei- bis dreistelligen Kuerzel genau das Risiko haben (tor in
+// Torjaeger/Torwart/Vortor, iv in "aktiv", av in "Erstattung" jeweils Teil
+// eines laengeren Worts).
+function positionTokens(rawPosition: string): string[] {
+  return rawPosition
+    .split(/[\s,/()\-]+/)
+    .map(normalizeToken)
+    .filter((t) => t.length > 0);
+}
+
 export function positionCategory(rawPosition: string): PositionCategory {
   const n = normalizeToken(rawPosition);
-  if (n.includes("tor")) return "torwart";
-  if (n.includes("abwehr") || n.includes("verteidig") || n.includes("iv") || n.includes("av")) return "abwehr";
-  if (n.includes("mittelfeld") || n.includes("zm") || n.includes("dm") || n.includes("om")) return "mittelfeld";
+  const tokens = new Set(positionTokens(rawPosition));
+  // "torwart" bleibt als eindeutiges volles Wort Teilstring-Suche (kein
+  // realistisches anderes Wort enthaelt "torwart"); das Kuerzel "tor" greift
+  // nur als eigenstaendiges Token -- das trennt "Torjaeger" (Teilstring "tor",
+  // aber kein Token "tor" und kein Wort "torwart") sauber von "TOR"/"Torwart".
+  if (n.includes("torwart") || tokens.has("tor")) return "torwart";
+  if (n.includes("abwehr") || n.includes("verteidig") || tokens.has("iv") || tokens.has("av")) return "abwehr";
+  if (n.includes("mittelfeld") || tokens.has("zm") || tokens.has("dm") || tokens.has("om")) return "mittelfeld";
   if (n.includes("sturm") || n.includes("stuerm") || n.includes("angriff")) return "sturm";
   return "unbekannt";
 }
@@ -106,6 +130,21 @@ const ALLOWED_VOCAB = new Set(
   ].map(normalizeToken),
 );
 
+// N-1 (Security-Re-Review): 2-Zeichen-Tokens, die NICHT durch einen P-Ref
+// ersetzt wurden, muessen trotzdem gegen eine feste Liste bekannter
+// 2-Zeichen-Funktionswoerter geprueft werden statt stillschweigend
+// durchzulaufen -- sonst waere z.B. ein Wort wie "ab" unblockiert Klartext im
+// Modellaufruf. Bewusst klein und geschlossen, analog zu ALLOWED_VOCAB.
+//
+// Security-Re-Review, Finding 1: "an", "im", "so", "du", "es", "er", "ja"
+// bewusst NICHT aufgenommen -- das sind zugleich plausible kurze Nachnamen.
+// Ist ein Spieler mit so einem Namen nicht im aktuellen Kader-Payload (Gast,
+// Vertretung, teamfremde Frage), wuerde das Wort sonst als "erlaubtes
+// Funktionswort" durchgelassen statt zu blockieren -- ein echter, wenn auch
+// seltener Klartext-Leckpfad. Nur die wenig namensartigen Praepositionen/
+// Funktionswoerter bleiben in der Liste.
+const ALLOWED_SHORT_VOCAB = new Set(["zu", "ab", "am", "in", "ob", "wo"].map(normalizeToken));
+
 const AMBIGUOUS_MARKER = "jemand";
 
 const TOKEN_RE = /[\p{L}\p{M}]+|[0-9]+/gu;
@@ -150,13 +189,19 @@ export function buildPlayerRefs(payload: CoachKaderPayloadLike): ResolvedPlayerR
 }
 
 // normalizedNamePart -> alle Refs, die diesen Bestandteil im Anzeigenamen
-// tragen (Vor-/Nachname einzeln, ab normalisierter Laenge 3).
+// tragen (Vor-/Nachname einzeln, ab normalisierter Laenge 2).
+//
+// N-1 (Security-Re-Review): vorher ab Laenge 3 -- ein Spieler mit
+// 2-Zeichen-Namensbestandteil ("Li", "Wu", "Oh") wurde dadurch NIE indexiert
+// und ging unveraendert als Klartext an das Modell, sobald sein Name in der
+// Frage vorkam. Die Schwelle ab hier auf 2 gesenkt; ein Guard fuer
+// (theoretisch durch den Split nicht auftretende) leere Reste bleibt.
 function buildNamePartIndex(refs: readonly ResolvedPlayerRef[]): Map<string, ResolvedPlayerRef[]> {
   const index = new Map<string, ResolvedPlayerRef[]>();
   for (const r of refs) {
     for (const rawPart of r.name.split(/[\s-]+/)) {
       const part = normalizeToken(rawPart);
-      if (part.length < 3) continue;
+      if (part.length < 2) continue;
       const list = index.get(part) ?? [];
       list.push(r);
       index.set(part, list);
@@ -170,12 +215,21 @@ export type ResolveResult =
   // C1: die Frage enthaelt nach der Namens-/Nummern-Ersetzung noch mindestens
   // ein Wort, das weder ein P-Ref noch aus der festen Vokabelliste ist --
   // harte Absage, KEIN Modellaufruf, KEIN stiller Fallback.
-  | { ok: false; reason: "unresolved_token" };
+  | { ok: false; reason: "unresolved_token" }
+  // N-2 (Security-Re-Review): ein Namensbestandteil trifft mehrere Personen
+  // (z.B. geteilter Nachname) -- harte Absage OHNE Modellaufruf, statt den
+  // neutralen Platzhalter durchzulassen und das Modell zwischen Kandidaten
+  // waehlen zu lassen (bzw. bei "keine" alle freien Spieler aufzulisten).
+  | { ok: false; reason: "ambiguous_name" };
 
 export function resolvePlayerRefs(question: string, payload: CoachKaderPayloadLike): ResolveResult {
   const refs = buildPlayerRefs(payload);
   const namePartIndex = buildNamePartIndex(refs);
   const mentioned = new Set<string>();
+  // N-2: sobald ein Namensbestandteil mehrdeutig ist, brechen wir NACH dem
+  // replace()-Durchlauf sofort mit einer Absage ab -- kein Modellaufruf, kein
+  // neutraler Platzhalter, der das Modell raten laesst.
+  let ambiguous = false;
 
   let pseudonymized = question.replace(TOKEN_RE, (match) => {
     if (/^[0-9]+$/.test(match)) {
@@ -191,7 +245,9 @@ export function resolvePlayerRefs(question: string, payload: CoachKaderPayloadLi
     }
 
     const norm = normalizeToken(match);
-    if (norm.length < 3) return match;
+    // N-1: Schwelle von < 3 auf < 2 gesenkt, damit 2-Zeichen-Namensbestandteile
+    // ("Li", "Wu", "Oh") ueberhaupt gegen den Namensindex geprueft werden.
+    if (norm.length < 2) return match;
 
     const owners = namePartIndex.get(norm);
     if (!owners || owners.length === 0) return match;
@@ -200,20 +256,29 @@ export function resolvePlayerRefs(question: string, payload: CoachKaderPayloadLi
       return owners[0].ref;
     }
     // Namensbestandteil ist zwischen mehreren Personen mehrdeutig (z.B.
-    // geteilter Nachname): alle moeglichen Personen bleiben im Team-Scope
-    // (subject_ids) fuer die Tuer-Pruefung, das Modell sieht nur den
-    // neutralen Platzhalter, nie eine konkrete Zuordnung.
+    // geteilter Nachname): fail-closed statt raten lassen (N-2).
+    ambiguous = true;
     for (const o of owners) mentioned.add(o.ref);
     return AMBIGUOUS_MARKER;
   });
+
+  if (ambiguous) {
+    return { ok: false, reason: "ambiguous_name" };
+  }
 
   const refPattern = new RegExp(`^p\\d{2,}$`, "i");
   for (const match of pseudonymized.matchAll(ALNUM_RE)) {
     const token = match[0];
     const norm = normalizeToken(token);
-    if (norm.length <= 2) continue;
     if (refPattern.test(token)) continue;
     if (norm === AMBIGUOUS_MARKER) continue;
+    // N-1: 2-Zeichen-Tokens duerfen NICHT mehr stillschweigend durchlaufen --
+    // sie muessen entweder ein ersetzter P-Ref-Rest sein (oben behandelt) oder
+    // gegen die geschlossene Kurzwortliste geprueft werden.
+    if (norm.length <= 2) {
+      if (ALLOWED_SHORT_VOCAB.has(norm)) continue;
+      return { ok: false, reason: "unresolved_token" };
+    }
     if (ALLOWED_VOCAB.has(norm)) continue;
     // Unbekanntes Wort ausserhalb der geschlossenen Vokabelliste -- fail-closed.
     return { ok: false, reason: "unresolved_token" };

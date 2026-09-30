@@ -84,6 +84,40 @@ describe("T3: kein service_role im Modellpfad", () => {
     expect(sawAny).toBe(false);
   });
 
+  // N-3-Rest (Security-Re-Review, I-3-Rest aus AP-70b): der obige Scan deckte
+  // nur lib/ai/gateway ab. lib/trainerQuery ist Teil des T3-Scans weiter oben
+  // (.from(/service_role), aber nicht dieses spezifischere .rpc()-Literalscans
+  // gegen die Registry -- ein kuenftiger direkter supabase.rpc(...)-Aufruf in
+  // lib/trainerQuery (statt ueber gatewayDb(...).readDoor) waere sonst von
+  // keinem Test bemerkt worden.
+  it("RPC-Namen in lib/trainerQuery sind Teilmenge der Registry aus purposes.ts", () => {
+    const allowed = allowedGatewayRpcNames();
+    const trainerQueryFiles = filesUnder(join(ROOT, "lib/trainerQuery")).filter((f) => !f.endsWith(".test.ts"));
+    const rpcCallPattern = /\.rpc\(\s*["'`]([^"'`]+)["'`]/g;
+    let sawAny = false;
+    for (const f of trainerQueryFiles) {
+      const text = readFileSync(f, "utf8");
+      for (const match of text.matchAll(rpcCallPattern)) {
+        sawAny = true;
+        expect(allowed.has(match[1]), `${relative(ROOT, f)}: RPC-Name "${match[1]}" nicht in der Registry`).toBe(true);
+      }
+    }
+    // Heutiger Stand: lib/trainerQuery greift ausschliesslich ueber
+    // gatewayDb(...).readDoor zu, kein Literal-Name matcht.
+    expect(sawAny).toBe(false);
+  });
+
+  // N-3-Rest: createSupabaseServerClient ist in lib/trainerQuery komplett
+  // untersagt, nicht nur .rpc()-Literale -- ein direkter Admin-/Server-Client
+  // wuerde den Gateway-Kern (samt Pseudonymisierung/Registry-Scan) umgehen.
+  it("createSupabaseServerClient wird in lib/trainerQuery nicht importiert", () => {
+    const trainerQueryFiles = filesUnder(join(ROOT, "lib/trainerQuery")).filter((f) => !f.endsWith(".test.ts"));
+    for (const f of trainerQueryFiles) {
+      const text = readFileSync(f, "utf8");
+      expect(text, relative(ROOT, f)).not.toMatch(/createSupabaseServerClient/);
+    }
+  });
+
   it("die Registry selbst nennt genau die heute bekannten Tueren (AP-69 und AP-70b)", () => {
     const allowed = allowedGatewayRpcNames();
     expect(allowed.has("rpc_squad_check_jev_context")).toBe(true);

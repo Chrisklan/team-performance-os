@@ -94,7 +94,7 @@ describe("G-01: Trainer-Query Prompt-Kriterien", () => {
 
 describe("resolve.ts: Pseudonymisierung (C1, fail-closed)", () => {
   it("ersetzt den vollen Namen durch den zugehoerigen P-Ref", () => {
-    const result = resolvePlayerRefs("Wie geht es Max Mustermann heute?", payload());
+    const result = resolvePlayerRefs("Wie geht das mit Max Mustermann heute?", payload());
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.pseudonymizedQuestion).not.toMatch(/Max/);
@@ -166,6 +166,41 @@ describe("resolve.ts: Pseudonymisierung (C1, fail-closed)", () => {
     expect(result.refs).toHaveLength(2);
   });
 
+  // N-1 (Security-Re-Review): 2-Zeichen-Namensbestandteile wurden vorher NIE
+  // indexiert (Schwelle < 3) und liefen als Klartext durch.
+  it("N-1: ein 2-Zeichen-Namensbestandteil wird korrekt durch seinen P-Ref ersetzt", () => {
+    const p = payload();
+    p.members[0].player.name = "Bo Li";
+    const result = resolvePlayerRefs("Ist Li heute frei?", p);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.pseudonymizedQuestion).not.toMatch(/\bLi\b/);
+    expect(result.mentionedRefs).toHaveLength(1);
+    expect(result.mentionedRefs[0].name).toBe("Bo Li");
+  });
+
+  it("N-1: ein unbekanntes 2-Zeichen-Wort ausserhalb der neuen Liste blockiert weiterhin", () => {
+    const result = resolvePlayerRefs("Ist xy heute frei?", payload());
+    expect(result).toEqual({ ok: false, reason: "unresolved_token" });
+  });
+
+  it("N-1: ein bekanntes 2-Zeichen-Funktionswort aus der neuen Liste blockiert die Anfrage NICHT", () => {
+    const result = resolvePlayerRefs("Wer ist ab heute frei?", payload());
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.mentionedRefs).toHaveLength(0);
+  });
+
+  // N-2 (Security-Re-Review): ein mehrdeutiger Namenstreffer muss zur Absage
+  // fuehren, OHNE dass ein pseudonymizedQuestion entsteht, das ans Modell ginge.
+  it("N-2: zwei Spieler mit demselben Nachnamensbestandteil fuehren zu ambiguous_name", () => {
+    const p = payload();
+    p.members[1].player.name = "Petra Mustermann";
+    const result = resolvePlayerRefs("Ist Mustermann heute frei?", p);
+    expect(result).toEqual({ ok: false, reason: "ambiguous_name" });
+    expect(result).not.toHaveProperty("pseudonymizedQuestion");
+  });
+
   it("P-Refs sind stabil geformt (P + Ziffern, Mindestbreite 2)", () => {
     const refs = buildPlayerRefs(payload());
     for (const r of refs) expect(r.ref).toMatch(/^P\d{2,}$/);
@@ -198,6 +233,25 @@ describe("resolve.ts: positionCategory (I-2)", () => {
   it("ein frei gepflegter, unbekannter Wert mappt auf 'unbekannt', nie auf Freitext", () => {
     expect(positionCategory("IV (Reha)")).toBe("abwehr");
     expect(positionCategory("Kapitaen ohne Stammposition")).toBe("unbekannt");
+  });
+
+  // N-3 (Security-Re-Review): Kuerzel-Erkennung nur bei eigenstaendigem
+  // Token, nicht als Teilstring -- "Torjaeger" enthaelt "tor" als Teilstring,
+  // ist aber kein Torwart.
+  it("N-3: 'Torjaeger' wird NICHT als Torwart kategorisiert (kein Teilstring-Treffer mehr)", () => {
+    expect(positionCategory("Torjäger")).not.toBe("torwart");
+  });
+
+  // Regressionsschutz: "IV (Reha)" muss trotz Klammer/Leerzeichen weiterhin
+  // als Abwehr erkannt werden (Tokenisierung darf das nicht kaputt machen).
+  it("N-3: 'IV (Reha)' bleibt weiterhin Abwehr (Regressionsschutz)", () => {
+    expect(positionCategory("IV (Reha)")).toBe("abwehr");
+  });
+
+  // Regressionsschutz: die reine Kuerzel-Schreibweise "TOR" muss weiterhin
+  // Torwart ergeben.
+  it("N-3: 'TOR' bleibt weiterhin Torwart (Regressionsschutz)", () => {
+    expect(positionCategory("TOR")).toBe("torwart");
   });
 });
 
